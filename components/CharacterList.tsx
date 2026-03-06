@@ -1317,6 +1317,20 @@ const CharacterList: React.FC<CharacterListProps> = ({
                               </div>
                           )}
                           <div className="mt-3 flex gap-2">
+                              {other.qrList && other.qrList.length > 0 && (
+                                  <Button
+                                      variant="secondary"
+                                      onClick={() => {
+                                          if (window.confirm(`确定将「${other.name}」的 ${other.qrList!.length} 个快速回复转移到「${char.name}」吗?`)) {
+                                              onUpdate?.({ ...char, qrList: other.qrList, extra_qr_data: (other as any).extra_qr_data });
+                                          }
+                                      }}
+                                      className="!py-1.5 !px-3 !text-xs !rounded-lg"
+                                      title={`从「${other.name}」转移快速回复`}
+                                  >
+                                      ⚡ ← QR
+                                  </Button>
+                              )}
                               <Button
                                   variant="danger"
                                   onClick={() => {
@@ -1449,9 +1463,9 @@ const CharacterList: React.FC<CharacterListProps> = ({
                                 <span>{new Date(viewCharacter.importDate || 0).toLocaleString()}</span>
                             </div>
                             {(viewCharacter as any).fileLastModified && (
-                                <div className="flex items-center gap-2 text-orange-400">
+                                <div className={`flex items-center gap-2 ${theme === 'light' ? 'text-gray-600' : 'text-gray-400'}`}>
                                     <span className="opacity-70">文件修改:</span>
-                                    <span className="font-semibold">{new Date((viewCharacter as any).fileLastModified).toLocaleString()}</span>
+                                    <span>{new Date((viewCharacter as any).fileLastModified).toLocaleString()}</span>
                                 </div>
                             )}
                         </div>
@@ -1491,7 +1505,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
                             <h4 className="font-bold opacity-70 mb-2 text-xs uppercase tracking-wider flex items-center gap-1.5">
                                 <span>👤</span> 作者备注 (Creator Notes)
                             </h4>
-                            <div className={`p-3 rounded-xl text-xs leading-relaxed whitespace-pre-wrap ${theme === 'light' ? 'bg-amber-50 border border-amber-200 text-amber-900' : 'bg-amber-500/10 border border-amber-500/20 text-amber-200'}`}>
+                            <div className={`p-3 rounded-xl text-xs leading-relaxed whitespace-pre-wrap opacity-80 ${theme === 'light' ? 'bg-white border border-gray-100 text-gray-700' : 'bg-black/20 text-gray-300'}`}>
                                 {viewCharacter.creator_notes}
                             </div>
                         </div>

@@ -353,7 +353,7 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
                         </div>
                         <div>
                             <label className={`block mb-2 ${labelColor}`}>文件修改时间 (FILE MODIFIED)</label>
-                            <div className={`w-full rounded-xl px-4 py-3 text-sm font-mono truncate ${(formData as any).fileLastModified ? 'text-orange-400 opacity-90' : 'opacity-40'} ${inputBg}`}>
+                            <div className={`w-full rounded-xl px-4 py-3 text-sm font-mono opacity-80 truncate ${inputBg}`}>
                                 {(formData as any).fileLastModified ? new Date((formData as any).fileLastModified).toLocaleString() : '未知'}
                             </div>
                         </div>
@@ -422,7 +422,7 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
                         <label className={`block mb-2 ${labelColor} flex items-center gap-1.5`}>
                             <User size={12}/> 作者备注 (CREATOR NOTES)
                         </label>
-                        <div className={`w-full rounded-xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap opacity-80 border ${theme === 'light' ? 'bg-amber-50/60 border-amber-200 text-amber-900' : 'bg-amber-500/10 border-amber-500/20 text-amber-200'}`}>
+                        <div className={`w-full rounded-xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap opacity-80 ${inputBg}`}>
                             {formData.creator_notes}
                         </div>
                     </div>
@@ -494,18 +494,6 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
                                     Alternate #{idx + 1}
                                 </span>
                                 <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <button 
-                                        type="button" 
-                                        onClick={() => {
-                                            if(confirm('Use this greeting as the main First Message?')) {
-                                                setFormData(prev => ({ ...prev, firstMessage: msg }));
-                                            }
-                                        }}
-                                        className="p-1.5 text-blue-400 hover:text-blue-500 transition-colors rounded-md hover:bg-blue-500/10"
-                                        title="Use as First Message"
-                                    >
-                                        <RotateCcw size={14}/>
-                                    </button>
                                     <button 
                                         type="button" 
                                         onClick={() => removeAltGreeting(idx)}
