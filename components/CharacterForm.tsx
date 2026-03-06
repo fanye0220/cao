@@ -9,10 +9,11 @@ interface CharacterFormProps {
   initialData?: Character;
   onSave: (char: Character) => void;
   onCancel: () => void;
+  onDelete?: (id: string) => void;
   theme: Theme;
 }
 
-const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCancel, theme }) => {
+const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCancel, onDelete, theme }) => {
   const [formData, setFormData] = useState<Partial<Character>>(initialData || {
     name: '',
     description: '',
@@ -289,7 +290,22 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
        </div>
 
        {/* Header Actions (Fixed relative to content) */}
-       <div className="flex justify-end mb-4 shrink-0 relative z-50">
+       <div className="flex justify-end gap-2 mb-4 shrink-0 relative z-50">
+           {initialData && onDelete && (
+               <button
+                   type="button"
+                   onClick={() => {
+                       if (window.confirm(`确定删除「${initialData.name}」吗？`)) {
+                           onDelete(initialData.id);
+                           onCancel();
+                       }
+                   }}
+                   className={`p-3 rounded-full backdrop-blur-md border transition-all duration-300 shadow-lg ${theme === 'light' ? 'bg-white/80 border-slate-300 hover:bg-red-50 hover:border-red-300 text-slate-400 hover:text-red-500' : 'bg-black/20 border-white/10 hover:bg-red-500/20 hover:border-red-500/30 text-gray-500 hover:text-red-400'}`}
+                   title="删除角色"
+               >
+                   <Trash2 size={20} />
+               </button>
+           )}
            <button 
                onClick={handleSubmit} 
                className={`p-3 rounded-full backdrop-blur-md border transition-all duration-300 shadow-lg ${theme === 'light' ? 'bg-white/80 border-slate-300 hover:bg-white text-slate-500' : 'bg-black/20 border-white/10 hover:bg-black/40 text-gray-400'}`}

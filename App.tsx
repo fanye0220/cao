@@ -248,6 +248,7 @@ function App() {
                 initialData={selectedCharacter}
                 onSave={handleSaveCharacter}
                 onCancel={() => setView('list')}
+                onDelete={(id) => { handleDeleteCharacter(id); setView('list'); }}
                 theme={theme}
               />
             </div>
