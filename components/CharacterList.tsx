@@ -449,13 +449,49 @@ const CharacterList: React.FC<CharacterListProps> = ({
           await new Promise(resolve => setTimeout(resolve, 0));
       }
 
-      const isPng = file.name.toLowerCase().endsWith('.png');
-      const isJson = file.name.toLowerCase().endsWith('.json');
+      const nameLower = file.name.toLowerCase();
+      const isPng = nameLower.endsWith('.png');
+      const isJson = nameLower.endsWith('.json');
       
       if (!isPng && !isJson) {
           continue; 
       }
+
       try {
+        // PNG：先读 magic bytes 判断是否真的是 PNG（排除 JPEG 等被改名的文件）
+        if (isPng) {
+            const header = await file.slice(0, 8).arrayBuffer();
+            const bytes = new Uint8Array(header);
+            const PNG_SIG = [137, 80, 78, 71, 13, 10, 26, 10];
+            const isRealPng = PNG_SIG.every((b, i) => bytes[i] === b);
+            if (!isRealPng) {
+                // JPEG 或其他图片格式，跳过（不是角色卡）
+                failCount++;
+                failedFiles.push(`${file.name}: 不是有效的角色卡 PNG（可能是 JPEG 头像图片）`);
+                continue;
+            }
+        }
+
+        // JSON：先读内容，区分是角色卡还是 QR 配置
+        if (isJson) {
+            const text = await file.text();
+            let jsonData: any;
+            try { jsonData = JSON.parse(text); } catch {
+                failCount++;
+                failedFiles.push(`${file.name}: JSON 解析失败`);
+                continue;
+            }
+            // 判断是否是 QR 文件（有 qrList 数组但没有角色卡特征）
+            const isQrFile = Array.isArray(jsonData?.qrList) && 
+                             !jsonData?.spec?.startsWith('chara_card') &&
+                             jsonData?.first_mes === undefined;
+            if (isQrFile) {
+                failCount++;
+                failedFiles.push(`${file.name}: 这是 QR 配置文件，请在角色编辑页面绑定 QR`);
+                continue;
+            }
+        }
+
         let char: Character;
         if (isPng) {
             char = await parseCharacterCard(file);
