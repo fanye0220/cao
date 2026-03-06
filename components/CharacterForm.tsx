@@ -41,11 +41,22 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
   const [isEditingFirstMes, setIsEditingFirstMes] = useState(false);
   const [tempFirstMes, setTempFirstMes] = useState('');
 
+  // World Info Modal State
+  const [showWorldInfoModal, setShowWorldInfoModal] = useState(false);
+  const [viewingWorldInfoIndex, setViewingWorldInfoIndex] = useState(-1);
+  const [isEditingWorldInfo, setIsEditingWorldInfo] = useState(false);
+  const [tempWorldInfo, setTempWorldInfo] = useState<any>(null);
+
   // Reset edit mode when switching messages or closing modal
   React.useEffect(() => {
       setIsEditingFirstMes(false);
       setTempFirstMes('');
   }, [viewingAltIndex, showFirstMesModal]);
+
+  React.useEffect(() => {
+      setIsEditingWorldInfo(false);
+      setTempWorldInfo(null);
+  }, [viewingWorldInfoIndex, showWorldInfoModal]);
 
   // Helper to get/set current message in modal
   const getCurrentMessage = () => {
@@ -149,6 +160,42 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
     setFormData(prev => ({ ...prev, alternate_greetings: prev.alternate_greetings?.filter((_, i) => i !== index) }));
   };
 
+  // World Info Handlers
+  const handleAddWorldInfo = () => {
+      const newEntry = { keys: [], content: '', name: 'New Entry', insertion_order: 50, case_sensitive: false };
+      setFormData(prev => {
+          const book = prev.character_book || { entries: [] };
+          return { ...prev, character_book: { ...book, entries: [...(book.entries || []), newEntry] } };
+      });
+      setViewingWorldInfoIndex((formData.character_book?.entries?.length || 0));
+      setTempWorldInfo(newEntry);
+      setIsEditingWorldInfo(true);
+  };
+
+  const removeWorldInfo = (index: number) => {
+      if (confirm('确定要删除这个世界书条目吗？')) {
+          setFormData(prev => {
+              const book = prev.character_book;
+              if (!book) return prev;
+              const newEntries = [...(book.entries || [])];
+              newEntries.splice(index, 1);
+              return { ...prev, character_book: { ...book, entries: newEntries } };
+          });
+          if (viewingWorldInfoIndex === index) setViewingWorldInfoIndex(-1);
+          else if (viewingWorldInfoIndex > index) setViewingWorldInfoIndex(viewingWorldInfoIndex - 1);
+      }
+  };
+
+  const updateWorldInfo = (index: number, entry: any) => {
+      setFormData(prev => {
+          const book = prev.character_book;
+          if (!book) return prev;
+          const newEntries = [...(book.entries || [])];
+          newEntries[index] = entry;
+          return { ...prev, character_book: { ...book, entries: newEntries } };
+      });
+  };
+
   // Construct the full character object for saving/exporting
   const getFullCharacter = (): Character => ({
       ...initialData,
@@ -166,6 +213,8 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
       originalFilename: formData.originalFilename,
       sourceUrl: formData.sourceUrl || '',
       cardUrl: formData.cardUrl || '',
+      creator_notes: formData.creator_notes || '',
+      fileLastModified: (formData as any).fileLastModified,
       updatedAt: Date.now(), // Add updatedAt for sorting
       importDate: initialData?.importDate || Date.now() // Preserve or set importDate
   });
@@ -303,9 +352,9 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
                             </div>
                         </div>
                         <div>
-                            <label className={`block mb-2 ${labelColor}`}>本地修改时间 (MODIFIED)</label>
-                            <div className={`w-full rounded-xl px-4 py-3 text-sm font-mono opacity-80 truncate ${inputBg}`}>
-                                {new Date().toLocaleString()}
+                            <label className={`block mb-2 ${labelColor}`}>文件修改时间 (FILE MODIFIED)</label>
+                            <div className={`w-full rounded-xl px-4 py-3 text-sm font-mono truncate ${(formData as any).fileLastModified ? 'text-orange-400 opacity-90' : 'opacity-40'} ${inputBg}`}>
+                                {(formData as any).fileLastModified ? new Date((formData as any).fileLastModified).toLocaleString() : '未知'}
                             </div>
                         </div>
                     </div>
@@ -367,6 +416,17 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
           <GlassCard theme={theme} className="p-6 mb-6 !bg-opacity-60">
               <div className={sectionTitle}><BookOpen size={20}/> 详细设定</div>
               <div className="space-y-6">
+                {/* Creator Notes - only show if exists */}
+                {formData.creator_notes && (
+                    <div>
+                        <label className={`block mb-2 ${labelColor} flex items-center gap-1.5`}>
+                            <User size={12}/> 作者备注 (CREATOR NOTES)
+                        </label>
+                        <div className={`w-full rounded-xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap opacity-80 border ${theme === 'light' ? 'bg-amber-50/60 border-amber-200 text-amber-900' : 'bg-amber-500/10 border-amber-500/20 text-amber-200'}`}>
+                            {formData.creator_notes}
+                        </div>
+                    </div>
+                )}
                 <div>
                     <label className={`block mb-2 ${labelColor}`}>简短描述 (DESCRIPTION)</label>
                     <textarea 
@@ -543,14 +603,25 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
           </GlassCard>
 
           {/* 4. Lorebook (Compact) */}
-          {formData.character_book?.entries?.length > 0 && (
-             <GlassCard theme={theme} className="p-4 mb-6 opacity-80 hover:opacity-100 transition-opacity">
-                <div className="flex justify-between items-center">
-                    <div className="font-bold text-sm flex items-center gap-2"><Book size={16}/> 世界书条目</div>
-                    <div className="text-xs opacity-60">{formData.character_book?.entries?.length} entries</div>
-                </div>
-             </GlassCard>
-          )}
+          <GlassCard theme={theme} className="p-6 mb-6 !bg-opacity-60">
+              <div className="flex justify-between items-center mb-4">
+                  <label className={`flex items-center gap-2 ${labelColor}`}>
+                      <Book size={14}/> 世界书 (WORLD INFO)
+                  </label>
+                  <button 
+                      onClick={() => { setShowWorldInfoModal(true); setViewingWorldInfoIndex(formData.character_book?.entries?.length ? 0 : -1); }}
+                      className={`text-xs px-3 py-1.5 rounded-lg font-bold flex items-center gap-1 transition-colors ${theme === 'light' ? 'bg-blue-50 text-blue-600 hover:bg-blue-100' : 'bg-blue-500/20 text-blue-300 hover:bg-blue-500/30'}`}
+                  >
+                      <Maximize size={12}/> 全屏查看 / 编辑
+                  </button>
+              </div>
+              <div className={`w-full rounded-2xl p-6 text-sm flex items-center justify-between ${theme === 'light' ? 'bg-slate-50' : 'bg-white/5'}`}>
+                  <span className={`font-medium ${theme === 'light' ? 'text-slate-600' : 'text-gray-300'}`}>
+                      当前包含 {formData.character_book?.entries?.length || 0} 个世界书条目
+                  </span>
+                  <BookOpen size={20} className="opacity-20" />
+              </div>
+          </GlassCard>
 
        </div>
 
@@ -740,6 +811,249 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
                                     </div>
                                 ))}
                             </div>
+                       </div>
+                   </div>
+               </div>
+           </div>
+       )}
+       {/* World Info Modal */}
+       {showWorldInfoModal && (
+           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-8">
+               <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowWorldInfoModal(false)} />
+               
+               <div className={`w-full max-w-6xl h-[85vh] shadow-2xl rounded-3xl flex flex-col border animate-in zoom-in-95 duration-200 relative z-10 overflow-hidden
+                    ${theme === 'light' ? 'bg-white/90 border-white/40' : 'bg-gray-900/90 border-white/10'} backdrop-blur-xl`}>
+                   
+                   {/* Header */}
+                   <div className={`px-6 py-4 border-b flex items-center justify-between shrink-0
+                        ${theme === 'light' ? 'bg-white/50 border-slate-200/50' : 'bg-white/5 border-white/10'}`}>
+                       <div className="flex items-center gap-4">
+                           <span className={`font-black text-lg flex items-center gap-2 ${theme === 'light' ? 'text-slate-800' : 'text-white'}`}>
+                               <BookOpen size={20} className="text-indigo-500" />
+                               世界书 (World Info)
+                           </span>
+                       </div>
+                       <div className="flex items-center gap-3">
+                           {isEditingWorldInfo && viewingWorldInfoIndex !== -1 ? (
+                               <>
+                                    <button 
+                                        onClick={() => {
+                                            updateWorldInfo(viewingWorldInfoIndex, tempWorldInfo);
+                                            setIsEditingWorldInfo(false);
+                                        }}
+                                        className="p-2 rounded-full bg-green-500/10 text-green-500 hover:bg-green-500/20 transition"
+                                        title="保存"
+                                    >
+                                        <Check size={20} />
+                                    </button>
+                                    <button 
+                                        onClick={() => setIsEditingWorldInfo(false)}
+                                        className="p-2 rounded-full bg-red-500/10 text-red-500 hover:bg-red-500/20 transition"
+                                        title="取消"
+                                    >
+                                        <X size={20} />
+                                    </button>
+                               </>
+                           ) : (
+                               <>
+                                   {viewingWorldInfoIndex !== -1 && (
+                                       <button 
+                                           onClick={() => {
+                                               setTempWorldInfo(formData.character_book?.entries?.[viewingWorldInfoIndex]);
+                                               setIsEditingWorldInfo(true);
+                                           }}
+                                           className={`p-2 rounded-full transition ${theme === 'light' ? 'hover:bg-slate-100 text-slate-500' : 'hover:bg-white/10 text-gray-400'}`}
+                                           title="编辑"
+                                       >
+                                           <Pen size={18} />
+                                       </button>
+                                   )}
+                                   <div className={`h-4 w-px ${theme === 'light' ? 'bg-slate-300' : 'bg-white/20'}`}></div>
+                                   <button 
+                                       onClick={() => setShowWorldInfoModal(false)} 
+                                       className={`p-2 rounded-full transition ${theme === 'light' ? 'hover:bg-slate-100 text-slate-500' : 'hover:bg-white/10 text-gray-400'}`}
+                                       title="关闭"
+                                   >
+                                       <X size={20} />
+                                   </button>
+                               </>
+                           )}
+                       </div>
+                   </div>
+                   
+                   <div className="flex-1 p-0 flex flex-col md:flex-row overflow-hidden relative">
+                       {/* Left: Navigation (List of entries) */}
+                       <div className={`w-72 md:w-80 flex flex-col border-r shrink-0
+                            ${theme === 'light' ? 'bg-slate-50/50 border-slate-200/50' : 'bg-black/40 border-white/10'}`}>
+                            <div className={`px-4 py-3 border-b text-[10px] font-bold uppercase tracking-widest flex justify-between items-center
+                                ${theme === 'light' ? 'border-slate-200/50 text-slate-400' : 'border-white/10 text-gray-500'}`}>
+                                <span>条目列表 ({formData.character_book?.entries?.length || 0})</span>
+                                <button 
+                                    onClick={handleAddWorldInfo} 
+                                    className={`p-1.5 rounded-lg transition-colors ${theme === 'light' ? 'text-indigo-500 hover:bg-indigo-100' : 'text-indigo-400 hover:bg-indigo-500/20'}`}
+                                >
+                                    <Plus size={16} />
+                                </button>
+                            </div>
+                            <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+                                {formData.character_book?.entries?.map((entry, idx) => (
+                                    <div key={idx}
+                                         onClick={() => {
+                                             if (isEditingWorldInfo && viewingWorldInfoIndex !== idx) {
+                                                 if (!confirm('有未保存的修改，确定要切换吗？')) return;
+                                             }
+                                             setViewingWorldInfoIndex(idx);
+                                         }}
+                                         className={`group rounded-xl p-3 shadow-sm border relative cursor-pointer transition-all active:scale-[0.98] 
+                                            ${viewingWorldInfoIndex === idx 
+                                                ? (theme === 'light' ? 'bg-indigo-50 border-indigo-200 ring-2 ring-indigo-100' : 'bg-indigo-500/20 border-indigo-500/50 ring-1 ring-indigo-500/50') 
+                                                : (theme === 'light' ? 'bg-white/60 border-slate-200 hover:border-indigo-300 hover:shadow-md' : 'bg-white/5 border-white/5 hover:bg-white/10 hover:border-white/20')}`}
+                                    >
+                                        <div className="flex items-center justify-between mb-2">
+                                            <div className={`text-xs font-bold truncate pr-6 ${theme === 'light' ? 'text-slate-700' : 'text-gray-200'}`}>
+                                                {entry.name || `Entry #${idx + 1}`}
+                                            </div>
+                                            {viewingWorldInfoIndex === idx && <Eye size={14} className="text-indigo-500 absolute right-3 top-3" />}
+                                        </div>
+                                        <div className={`text-[10px] font-mono truncate opacity-60 ${theme === 'light' ? 'text-slate-500' : 'text-gray-400'}`}>
+                                            Keys: {entry.keys?.join(', ') || '(无)'}
+                                        </div>
+                                        <button 
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                removeWorldInfo(idx);
+                                            }} 
+                                            className={`absolute bottom-2 right-2 p-1.5 opacity-0 group-hover:opacity-100 rounded-lg transition-all ${theme === 'light' ? 'hover:bg-red-100 hover:text-red-500' : 'hover:bg-red-500/20 hover:text-red-400'}`}
+                                        >
+                                            <Trash2 size={14} />
+                                        </button>
+                                    </div>
+                                ))}
+                                {(!formData.character_book?.entries || formData.character_book.entries.length === 0) && (
+                                    <div className={`text-center py-8 text-xs opacity-50 ${theme === 'light' ? 'text-slate-500' : 'text-gray-400'}`}>
+                                        暂无条目
+                                    </div>
+                                )}
+                            </div>
+                       </div>
+
+                       {/* Right: Editor */}
+                       <div className={`flex-1 flex flex-col overflow-hidden relative
+                            ${theme === 'light' ? 'bg-white/30' : 'bg-black/20'}`}>
+                            {viewingWorldInfoIndex !== -1 && formData.character_book?.entries?.[viewingWorldInfoIndex] ? (
+                                (() => {
+                                    const currentEntry = isEditingWorldInfo ? tempWorldInfo : formData.character_book.entries[viewingWorldInfoIndex];
+                                    return (
+                                        <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
+                                            {/* Name & Keys */}
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                                <div>
+                                                    <label className={`block mb-2 text-xs font-bold uppercase tracking-wider ${theme === 'light' ? 'text-slate-500' : 'text-gray-400'}`}>
+                                                        条目名称 (Name)
+                                                    </label>
+                                                    <input 
+                                                        readOnly={!isEditingWorldInfo}
+                                                        value={currentEntry.name || ''}
+                                                        onChange={(e) => setTempWorldInfo({...tempWorldInfo, name: e.target.value})}
+                                                        className={`w-full rounded-xl px-4 py-3 text-sm outline-none transition-all
+                                                            ${theme === 'light' ? 'bg-white/50 border border-slate-200 text-slate-800 focus:bg-white' : 'bg-black/20 border border-white/10 text-white focus:bg-black/40'}
+                                                            ${!isEditingWorldInfo ? 'opacity-80 cursor-default' : ''}`}
+                                                        placeholder="例如: 魔法设定"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className={`block mb-2 text-xs font-bold uppercase tracking-wider ${theme === 'light' ? 'text-slate-500' : 'text-gray-400'}`}>
+                                                        触发词 (Keys, 逗号分隔)
+                                                    </label>
+                                                    <input 
+                                                        readOnly={!isEditingWorldInfo}
+                                                        value={currentEntry.keys?.join(', ') || ''}
+                                                        onChange={(e) => setTempWorldInfo({...tempWorldInfo, keys: e.target.value.split(',').map(k => k.trim()).filter(Boolean)})}
+                                                        className={`w-full rounded-xl px-4 py-3 text-sm outline-none transition-all font-mono
+                                                            ${theme === 'light' ? 'bg-white/50 border border-slate-200 text-slate-800 focus:bg-white' : 'bg-black/20 border border-white/10 text-white focus:bg-black/40'}
+                                                            ${!isEditingWorldInfo ? 'opacity-80 cursor-default' : ''}`}
+                                                        placeholder="例如: 魔法, 魔力, 咒语"
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            {/* Content */}
+                                            <div className="flex-1 flex flex-col min-h-[300px]">
+                                                <label className={`block mb-2 text-xs font-bold uppercase tracking-wider flex justify-between ${theme === 'light' ? 'text-slate-500' : 'text-gray-400'}`}>
+                                                    <span>内容 (Content)</span>
+                                                    <span>{currentEntry.content?.length || 0} chars</span>
+                                                </label>
+                                                <textarea 
+                                                    readOnly={!isEditingWorldInfo}
+                                                    value={currentEntry.content || ''}
+                                                    onChange={(e) => setTempWorldInfo({...tempWorldInfo, content: e.target.value})}
+                                                    className={`w-full flex-1 rounded-xl p-4 text-sm leading-7 outline-none font-mono resize-none custom-scrollbar transition-all
+                                                        ${theme === 'light' ? 'bg-white/50 border border-slate-200 text-slate-700 focus:bg-white' : 'bg-black/20 border border-white/10 text-gray-200 focus:bg-black/40'}
+                                                        ${!isEditingWorldInfo ? 'opacity-80 cursor-default' : ''}`}
+                                                    placeholder="输入世界书内容..."
+                                                />
+                                            </div>
+
+                                            {/* Advanced Settings */}
+                                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                                <div className="flex items-center gap-2">
+                                                    <input 
+                                                        type="checkbox" 
+                                                        id="wi-enabled"
+                                                        disabled={!isEditingWorldInfo}
+                                                        checked={currentEntry.enabled !== false}
+                                                        onChange={(e) => setTempWorldInfo({...tempWorldInfo, enabled: e.target.checked})}
+                                                        className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                    />
+                                                    <label htmlFor="wi-enabled" className={`text-sm ${theme === 'light' ? 'text-slate-600' : 'text-gray-300'}`}>启用 (Enabled)</label>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <input 
+                                                        type="checkbox" 
+                                                        id="wi-casesensitive"
+                                                        disabled={!isEditingWorldInfo}
+                                                        checked={currentEntry.case_sensitive || false}
+                                                        onChange={(e) => setTempWorldInfo({...tempWorldInfo, case_sensitive: e.target.checked})}
+                                                        className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                    />
+                                                    <label htmlFor="wi-casesensitive" className={`text-sm ${theme === 'light' ? 'text-slate-600' : 'text-gray-300'}`}>区分大小写</label>
+                                                </div>
+                                                <div>
+                                                    <label className={`block mb-1 text-xs font-bold uppercase ${theme === 'light' ? 'text-slate-500' : 'text-gray-400'}`}>插入顺序 (Order)</label>
+                                                    <input 
+                                                        type="number"
+                                                        readOnly={!isEditingWorldInfo}
+                                                        value={currentEntry.insertion_order ?? 50}
+                                                        onChange={(e) => setTempWorldInfo({...tempWorldInfo, insertion_order: parseInt(e.target.value) || 0})}
+                                                        className={`w-full rounded-lg px-3 py-2 text-sm outline-none transition-all
+                                                            ${theme === 'light' ? 'bg-white/50 border border-slate-200 text-slate-800' : 'bg-black/20 border border-white/10 text-white'}
+                                                            ${!isEditingWorldInfo ? 'opacity-80 cursor-default' : ''}`}
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className={`block mb-1 text-xs font-bold uppercase ${theme === 'light' ? 'text-slate-500' : 'text-gray-400'}`}>优先级 (Priority)</label>
+                                                    <input 
+                                                        type="number"
+                                                        readOnly={!isEditingWorldInfo}
+                                                        value={currentEntry.priority ?? 10}
+                                                        onChange={(e) => setTempWorldInfo({...tempWorldInfo, priority: parseInt(e.target.value) || 0})}
+                                                        className={`w-full rounded-lg px-3 py-2 text-sm outline-none transition-all
+                                                            ${theme === 'light' ? 'bg-white/50 border border-slate-200 text-slate-800' : 'bg-black/20 border border-white/10 text-white'}
+                                                            ${!isEditingWorldInfo ? 'opacity-80 cursor-default' : ''}`}
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })()
+                            ) : (
+                                <div className="flex-1 flex items-center justify-center">
+                                    <div className={`text-center opacity-50 ${theme === 'light' ? 'text-slate-500' : 'text-gray-400'}`}>
+                                        <BookOpen size={48} className="mx-auto mb-4 opacity-20" />
+                                        <p>请在左侧选择一个条目</p>
+                                    </div>
+                                </div>
+                            )}
                        </div>
                    </div>
                </div>

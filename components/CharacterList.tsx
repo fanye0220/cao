@@ -1,11 +1,9 @@
 import React, { useRef, useState, useMemo, useEffect } from 'react';
-import { createPortal } from 'react-dom';
 import { Character, Theme } from '../types';
 import Button from './ui/Button';
 import Modal from './ui/Modal';
-import { Pencil, Trash2, Upload, AlertCircle, Download, FileText, AlertTriangle, QrCode, CheckSquare, Square, Filter, ChevronLeft, ChevronRight, ChevronDown, FolderInput, Book, MessageSquare, MoreVertical, FileJson, Image as ImageIcon, Check, Heart, Star, List, Tag, Menu, X, Plus, Copy, Folder, FolderPlus, GitCompare, Maximize } from 'lucide-react';
+import { Pencil, Trash2, Upload, AlertCircle, Download, FileText, AlertTriangle, CheckSquare, Square, Filter, ChevronLeft, ChevronRight, ChevronDown, FolderInput, Book, MessageSquare, MoreVertical, FileJson, Image as ImageIcon, Check, Heart, Star, List, Tag, Menu, X, Plus, Copy, Folder, FolderPlus, GitCompare, Maximize, Search } from 'lucide-react';
 import { parseCharacterCard, parseCharacterJson, exportCharacterData, exportBulkCharacters } from '../services/cardImportService';
-import { deleteImage } from '../services/imageService';
 
 // Removed invalid module augmentation. We will cast props if needed or ignore the error for now as it's just for directory upload.
 // If needed, we can use a custom input component or just ignore the TS error on the input element locally.
@@ -57,6 +55,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
   const [isTagsExpanded, setIsTagsExpanded] = useState(true);
   const [isCollectionsExpanded, setIsCollectionsExpanded] = useState(true);
   const [activeFilter, setActiveFilter] = useState<{ type: 'all' | 'favorite' | 'tag' | 'duplicate' | 'collection', value?: string }>({ type: 'all' });
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Resizable Sidebar State
   const [collectionsHeight, setCollectionsHeight] = useState(180);
@@ -102,6 +101,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
   // States
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [lastSelectedId, setLastSelectedId] = useState<string | null>(null);
   const [exportMenuCharId, setExportMenuCharId] = useState<string | null>(null);
   const [sortOption, setSortOption] = useState<'updated-desc' | 'date-desc' | 'date-asc' | 'name-asc' | 'name-desc'>('updated-desc');
   const [compareModalOpen, setCompareModalOpen] = useState(false);
@@ -137,6 +137,44 @@ const CharacterList: React.FC<CharacterListProps> = ({
       setRenameValue(name);
   };
 
+  // Drag and Drop State
+  const [draggedCharId, setDraggedCharId] = useState<string | null>(null);
+  const [dragOverCollection, setDragOverCollection] = useState<string | null>(null);
+
+  const handleDragStart = (e: React.DragEvent, charId: string) => {
+      setDraggedCharId(charId);
+      e.dataTransfer.setData('text/plain', charId);
+      e.dataTransfer.effectAllowed = 'copy';
+  };
+
+  const handleDragOver = (e: React.DragEvent, collectionName: string) => {
+      e.preventDefault();
+      setDragOverCollection(collectionName);
+      e.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+      e.preventDefault();
+      setDragOverCollection(null);
+  };
+
+  const handleDrop = (e: React.DragEvent, collectionName: string) => {
+      e.preventDefault();
+      setDragOverCollection(null);
+      const charId = e.dataTransfer.getData('text/plain');
+      
+      if (charId) {
+          const char = characters.find(c => c.id === charId);
+          if (char) {
+              const currentTags = Array.isArray(char.tags) ? char.tags : [];
+              if (!currentTags.includes(collectionName)) {
+                  onUpdate?.({ ...char, tags: [...currentTags, collectionName] });
+                  // Optional: Show success feedback
+              }
+          }
+      }
+      setDraggedCharId(null);
+  };
   const handleFinishRenameCollection = () => {
       if (!editingCollection || !renameValue.trim()) {
           setEditingCollection(null);
@@ -145,6 +183,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
       const newName = renameValue.trim();
       if (newName !== editingCollection && !collections.includes(newName)) {
           setCollections(prev => prev.map(c => c === editingCollection ? newName : c));
+          
           // Update characters
           characters.forEach(char => {
               const currentTags = Array.isArray(char.tags) ? char.tags : [];
@@ -235,6 +274,15 @@ const CharacterList: React.FC<CharacterListProps> = ({
   const filteredCharacters = useMemo(() => {
     let result = characters;
     
+    if (searchQuery.trim()) {
+        const query = searchQuery.toLowerCase();
+        result = result.filter(c => 
+            c.name.toLowerCase().includes(query) || 
+            (c.description && c.description.toLowerCase().includes(query)) ||
+            (c.firstMessage && c.firstMessage.toLowerCase().includes(query))
+        );
+    }
+    
     // Apply Active Filter
     if (activeFilter.type === 'favorite') {
         result = result.filter(c => c.isFavorite);
@@ -261,16 +309,16 @@ const CharacterList: React.FC<CharacterListProps> = ({
         }
         return 0;
     });
-  }, [characters, duplicateIds, sortOption, activeFilter]);
+  }, [characters, duplicateIds, sortOption, activeFilter, searchQuery]);
 
-  const groupedCharacters = useMemo<Record<string, Character[]> | null>(() => {
+  const groupedCharacters = useMemo<[string, Character[]][] | null>(() => {
     if (activeFilter.type !== 'duplicate') return null;
     const groups: Record<string, Character[]> = {};
     filteredCharacters.forEach(c => {
       if (!groups[c.name]) groups[c.name] = [];
       groups[c.name].push(c);
     });
-    return groups;
+    return Object.entries(groups);
   }, [filteredCharacters, activeFilter]);
 
   const displayCharacters = useMemo(() => {
@@ -279,7 +327,15 @@ const CharacterList: React.FC<CharacterListProps> = ({
     return filteredCharacters.slice(startIndex, startIndex + itemsPerPage);
   }, [filteredCharacters, currentPage, itemsPerPage, activeFilter]);
 
-  const totalPages = Math.ceil(filteredCharacters.length / itemsPerPage);
+  const displayGroups = useMemo(() => {
+    if (!groupedCharacters) return [];
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return groupedCharacters.slice(startIndex, startIndex + itemsPerPage);
+  }, [groupedCharacters, currentPage, itemsPerPage]);
+
+  const totalPages = activeFilter.type === 'duplicate' 
+    ? Math.ceil((groupedCharacters?.length || 0) / itemsPerPage)
+    : Math.ceil(filteredCharacters.length / itemsPerPage);
 
   const renderCharacterCard = (char: Character) => {
     const isDuplicate = duplicateIds.has(char.id);
@@ -291,10 +347,12 @@ const CharacterList: React.FC<CharacterListProps> = ({
     return (
         <div 
             key={char.id} 
-            onClick={() => {
-                if (isSelectionMode) toggleSelection(char.id);
+            onClick={(e) => {
+                if (isSelectionMode) toggleSelection(char.id, e.shiftKey);
                 else onSelect(char);
             }}
+            draggable
+            onDragStart={(e) => handleDragStart(e, char.id)}
             className={`
                 flex flex-col h-[500px] rounded-[24px] overflow-hidden relative group transition-all duration-300
                 ${theme === 'light' 
@@ -302,9 +360,10 @@ const CharacterList: React.FC<CharacterListProps> = ({
                     : 'bg-[#1a1b1e] shadow-xl hover:shadow-2xl border border-white/10'
                 }
                 ${isSelected ? 'transform scale-[0.98] border-blue-500/50' : 'hover:-translate-y-1'}
-                cursor-pointer
+                cursor-grab active:cursor-grabbing
                 ${isDuplicate && activeFilter.type !== 'duplicate' && theme === 'dark' ? 'border-yellow-500/50 shadow-[0_0_10px_rgba(234,179,8,0.1)]' : ''} 
                 ${isDuplicate && activeFilter.type !== 'duplicate' && theme === 'light' ? 'border-yellow-400 shadow-md' : ''}
+                ${draggedCharId === char.id ? 'opacity-50' : ''}
             `}
         >
         
@@ -318,18 +377,6 @@ const CharacterList: React.FC<CharacterListProps> = ({
             />
             {/* Dark gradient overlay */}
             <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/80 to-transparent pointer-events-none" />
-
-            {/* View Details Button */}
-            <button
-                onClick={(e) => {
-                    e.stopPropagation();
-                    setViewCharacter(char);
-                }}
-                className="absolute top-2 right-2 p-2 rounded-full bg-black/40 hover:bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-all duration-200 backdrop-blur-sm transform hover:scale-110 z-10"
-                title="查看详情"
-            >
-                <Maximize size={16} />
-            </button>
         </div>
 
         {/* Content Section */}
@@ -344,7 +391,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
                         {char.name}
                     </h3>
                     <div className="flex items-center gap-1 flex-shrink-0">
-                        {hasQr && <QrCode size={14} className="text-green-500" title="包含二维码配置" />}
+                        {hasQr && <span className="text-[9px] font-extrabold text-green-500 border border-green-500/50 rounded-[3px] px-1 py-[1px] leading-none" title="包含二维码配置">QR</span>}
                         {hasWorldInfo && <Book size={14} className="text-yellow-500" title="包含世界书" />}
                     </div>
                 </div>
@@ -361,7 +408,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
                      </span>
                      <div className={`px-1.5 py-0.5 rounded text-[9px] font-bold flex items-center gap-1 ${theme === 'light' ? 'bg-white text-gray-400 shadow-sm' : 'bg-black/20 text-gray-500'}`}>
                          <MessageSquare size={8} /> 
-                         <span>{char.firstMessage?.length || 0}</span>
+                         <span>{(char.firstMessage ? 1 : 0) + (char.alternate_greetings?.length || 0)}</span>
                      </div>
                  </div>
                  <p className={`text-[11px] line-clamp-4 leading-relaxed ${theme === 'light' ? 'text-gray-600' : 'text-gray-400'}`}>
@@ -453,16 +500,49 @@ const CharacterList: React.FC<CharacterListProps> = ({
     if (folderInputRef.current) folderInputRef.current.value = '';
   };
 
-  const toggleSelection = (id: string) => {
+  const toggleSelection = (id: string, shiftKey: boolean = false) => {
     const newSet = new Set(selectedIds);
-    if (newSet.has(id)) newSet.delete(id);
-    else newSet.add(id);
+    
+    // Determine the current list of visible characters
+    let currentVisibleList: Character[] = [];
+    if (activeFilter.type === 'duplicate') {
+        // Flatten the groups
+        currentVisibleList = displayGroups.flatMap(([_, chars]) => chars);
+    } else {
+        currentVisibleList = displayCharacters;
+    }
+
+    if (shiftKey && lastSelectedId) {
+        const currentIndex = currentVisibleList.findIndex(c => c.id === id);
+        const lastIndex = currentVisibleList.findIndex(c => c.id === lastSelectedId);
+
+        if (currentIndex !== -1 && lastIndex !== -1) {
+            const start = Math.min(currentIndex, lastIndex);
+            const end = Math.max(currentIndex, lastIndex);
+            
+            // Select everything in range
+            for (let i = start; i <= end; i++) {
+                newSet.add(currentVisibleList[i].id);
+            }
+        } else {
+             // Fallback: just toggle the current one
+             if (newSet.has(id)) newSet.delete(id);
+             else newSet.add(id);
+        }
+    } else {
+        // Normal toggle
+        if (newSet.has(id)) newSet.delete(id);
+        else newSet.add(id);
+    }
+    
     setSelectedIds(newSet);
+    setLastSelectedId(id);
   };
 
   const toggleSelectAll = () => {
     if (selectedIds.size === filteredCharacters.length) setSelectedIds(new Set());
     else setSelectedIds(new Set(filteredCharacters.map(c => c.id)));
+    setLastSelectedId(null);
   };
 
   const toggleSelectAllPage = () => {
@@ -475,6 +555,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
         currentList.forEach(c => newSet.add(c.id));
     }
     setSelectedIds(newSet);
+    setLastSelectedId(null);
   };
 
   const handleBulkExport = async () => {
@@ -484,6 +565,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
         await exportBulkCharacters(selectedChars, collections);
         setIsSelectionMode(false);
         setSelectedIds(new Set());
+        setLastSelectedId(null);
     } catch (e: any) {
         setError("批量导出失败: " + e.message);
     }
@@ -586,6 +668,8 @@ const CharacterList: React.FC<CharacterListProps> = ({
       <div className={`transition-all duration-300 flex flex-col shrink-0 ${isSidebarOpen ? 'w-64 opacity-100' : 'w-0 opacity-0 overflow-hidden'}`}>
           <div className={`flex-1 rounded-2xl p-4 flex flex-col gap-2 ${theme === 'light' ? 'bg-white/50 border border-slate-200' : 'bg-black/20 border border-white/10'}`}>
               
+
+
               {/* All Characters */}
               <button 
                   onClick={() => setActiveFilter({ type: 'all' })}
@@ -691,7 +775,13 @@ const CharacterList: React.FC<CharacterListProps> = ({
                               <button
                                   onClick={() => setActiveFilter({ type: 'collection', value: name })}
                                   onDoubleClick={(e) => handleStartRenameCollection(name, e)}
-                                  className={`w-full text-left px-4 py-2.5 rounded-xl text-sm font-medium flex items-center gap-2 transition-all group relative ${activeFilter.type === 'collection' && activeFilter.value === name ? (theme === 'light' ? 'bg-slate-200 text-slate-900' : 'bg-white/20 text-white') : (theme === 'light' ? 'hover:bg-white/50 text-slate-500' : 'hover:bg-white/5 text-gray-400')}`}
+                                  onDragOver={(e) => handleDragOver(e, name)}
+                                  onDragLeave={handleDragLeave}
+                                  onDrop={(e) => handleDrop(e, name)}
+                                  className={`w-full text-left px-4 py-2.5 rounded-xl text-sm font-medium flex items-center gap-2 transition-all group relative 
+                                    ${activeFilter.type === 'collection' && activeFilter.value === name ? (theme === 'light' ? 'bg-slate-200 text-slate-900' : 'bg-white/20 text-white') : (theme === 'light' ? 'hover:bg-white/50 text-slate-500' : 'hover:bg-white/5 text-gray-400')}
+                                    ${dragOverCollection === name ? (theme === 'light' ? 'bg-blue-100 ring-2 ring-blue-400' : 'bg-blue-500/30 ring-2 ring-blue-500') : ''}
+                                  `}
                               >
                                   <Folder size={14} className="opacity-70" />
                                   <span className="truncate flex-1">{name}</span>
@@ -849,7 +939,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col h-full min-w-0">
+      <div className="flex-1 flex flex-col h-full min-w-0 relative">
       {/* Header Controls */}
       <div className="flex flex-col xl:flex-row justify-between items-end mb-4 px-2 gap-4 shrink-0">
         <div className="flex items-center gap-4">
@@ -872,6 +962,23 @@ const CharacterList: React.FC<CharacterListProps> = ({
                    {activeFilter.type === 'collection' && `收藏夹 "${activeFilter.value}" 下共 ${characters.filter(c => (Array.isArray(c.tags) ? c.tags : []).includes(activeFilter.value || '')).length} 张卡片`}
                    {activeFilter.type === 'duplicate' && `共 ${duplicateIds.size} 张重复卡片`}
                </p>
+           </div>
+
+           {/* Search Box - Moved from Sidebar */}
+           <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-colors w-64 ${theme === 'light' ? 'bg-white/50 border-slate-200 focus-within:bg-white focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100' : 'bg-white/5 border-white/10 focus-within:bg-black/40 focus-within:border-blue-500/50'}`}>
+               <Search size={16} className={theme === 'light' ? 'text-slate-400' : 'text-gray-500'} />
+               <input 
+                   type="text"
+                   value={searchQuery}
+                   onChange={(e) => setSearchQuery(e.target.value)}
+                   placeholder="搜索角色..."
+                   className={`w-full bg-transparent outline-none text-sm font-medium ${theme === 'light' ? 'text-slate-700 placeholder-slate-400' : 'text-white placeholder-gray-500'}`}
+               />
+               {searchQuery && (
+                   <button onClick={() => setSearchQuery('')} className={`p-0.5 rounded-full transition-colors ${theme === 'light' ? 'text-slate-400 hover:bg-slate-100 hover:text-slate-600' : 'text-gray-500 hover:bg-white/10 hover:text-gray-300'}`}>
+                       <X size={14} />
+                   </button>
+               )}
            </div>
         </div>
         
@@ -897,6 +1004,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
                 onClick={() => {
                     setIsSelectionMode(!isSelectionMode);
                     setSelectedIds(new Set());
+                    setLastSelectedId(null);
                 }}
                 className={`flex items-center gap-2 px-3 py-1.5 border rounded-full text-xs font-medium backdrop-blur-sm transition-all ${isSelectionMode ? activeFilterClass : buttonBase}`}
             >
@@ -1006,11 +1114,11 @@ const CharacterList: React.FC<CharacterListProps> = ({
       {error && <div className="mb-4 mx-2 p-3 bg-red-500/20 border border-red-500/40 rounded-xl flex items-center gap-3 text-red-100 backdrop-blur-md text-sm"><AlertCircle className="text-red-400" size={16} />{error}</div>}
       {warning && <div className="mb-4 mx-2 p-3 bg-yellow-500/20 border border-yellow-500/40 rounded-xl flex items-center gap-3 text-yellow-100 backdrop-blur-md text-sm"><AlertTriangle className="text-yellow-400" size={16} />{warning}</div>}
 
-      {/* Grid */}
+        {/* Grid */}
       <div className="flex-1 overflow-y-auto min-h-0 pb-20 custom-scrollbar">
         {activeFilter.type === 'duplicate' && groupedCharacters ? (
             <div className="px-2 space-y-8">
-                {Object.entries(groupedCharacters).map(([name, chars]: [string, Character[]]) => (
+                {displayGroups.map(([name, chars]) => (
                     <div key={name} className="animate-fade-in">
                         {/* Group Header */}
                         <div className="flex items-center justify-between mb-4 pl-2 pr-4">
@@ -1028,7 +1136,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
                         </div>
                     </div>
                 ))}
-                {Object.keys(groupedCharacters).length === 0 && (
+                {displayGroups.length === 0 && (
                     <div className={`text-center py-20 opacity-50 ${textColor}`}>没有发现重复角色</div>
                 )}
             </div>
@@ -1037,10 +1145,11 @@ const CharacterList: React.FC<CharacterListProps> = ({
                 {displayCharacters.map((char) => renderCharacterCard(char))}
             </div>
         )}
+      </div>
 
-        {/* Pagination (Only for non-grouped view) */}
-        {activeFilter.type !== 'duplicate' && totalPages > 1 && (
-            <div className={`flex justify-between items-center gap-4 mt-6 mb-8 px-4 py-3 rounded-2xl ${theme === 'light' ? 'bg-white shadow-sm border border-slate-200' : 'bg-black/20 border border-white/10'}`}>
+      {/* Pagination - Fixed at Bottom */}
+      {totalPages > 1 && (
+            <div className={`absolute bottom-0 left-0 right-0 z-10 flex justify-between items-center gap-4 px-4 py-3 border-t backdrop-blur-md ${theme === 'light' ? 'bg-white/[0.37] border-slate-200' : 'bg-[#1a1b1e]/[0.37] border-white/10'}`}>
                 {/* Left: Items Per Page */}
                 <div className="flex items-center gap-2">
                     <span className={`text-xs font-medium ${theme === 'light' ? 'text-slate-500' : 'text-gray-400'}`}>每页显示</span>
@@ -1115,7 +1224,6 @@ const CharacterList: React.FC<CharacterListProps> = ({
             </div>
         )}
       </div>
-      </div>
       {/* Import Error Modal */}
       <Modal
         isOpen={importErrorModalOpen}
@@ -1175,192 +1283,135 @@ const CharacterList: React.FC<CharacterListProps> = ({
         </div>
       </Modal>
 
-      {/* Compare Modal - Deep Diff */}
+      {/* Compare Modal */}
       {compareModalOpen && selectedIds.size === 2 && (() => {
-        const diffPair = Array.from(selectedIds).map(id => characters.find(c => c.id === id)).filter(Boolean) as Character[];
-        if (diffPair.length < 2) return null;
-        const [charA, charB] = diffPair;
+          const [idA, idB] = Array.from(selectedIds);
+          const charA = characters.find(c => c.id === idA);
+          const charB = characters.find(c => c.id === idB);
+          if (!charA || !charB) return null;
 
-        const descLenA = (charA.description || '').length;
-        const descLenB = (charB.description || '').length;
-        const firstMesLenA = (charA.firstMessage || '').length;
-        const firstMesLenB = (charB.firstMessage || '').length;
-        const personalityLenA = (charA.personality || '').length;
-        const personalityLenB = (charB.personality || '').length;
-        const wiCountA = charA.character_book?.entries?.length || 0;
-        const wiCountB = charB.character_book?.entries?.length || 0;
-        const wiCharsA = (charA.character_book?.entries || []).reduce((sum, e) => sum + (e.content || '').length, 0);
-        const wiCharsB = (charB.character_book?.entries || []).reduce((sum, e) => sum + (e.content || '').length, 0);
-        const altCountA = 1 + (charA.alternate_greetings?.length || 0);
-        const altCountB = 1 + (charB.alternate_greetings?.length || 0);
+          const getFirstMesCount = (char: Character) => 1 + (char.alternate_greetings?.length || 0);
+          const getWICount = (char: Character) => char.character_book?.entries?.length || 0;
+          const getWIChars = (char: Character) => (char.character_book?.entries || []).reduce((sum, e) => sum + (e.content?.length || 0), 0);
 
-        const isDiff = (a: number, b: number) => a !== b;
+          const diffClass = (lenA: number, lenB: number, isA: boolean) => {
+              if (lenA === lenB) return theme === 'light' ? 'text-gray-700' : 'text-gray-300';
+              if (isA) return lenA > lenB ? 'text-green-500' : 'text-gray-500';
+              return lenB > lenA ? 'text-green-500' : 'text-gray-500';
+          };
+          const ringClass = (lenA: number, lenB: number) =>
+              lenA !== lenB ? (theme === 'light' ? 'ring-2 ring-rose-200 bg-rose-50/30' : 'ring-2 ring-rose-500/30 bg-rose-900/10') : '';
 
-        const cardBg = theme === 'light' ? 'bg-white border-gray-200 shadow-sm' : 'bg-white/5 border-white/10 shadow-lg';
-        const sectionBg = theme === 'light' ? 'bg-gray-50' : 'bg-black/20';
-        const diffRing = theme === 'light' ? 'ring-2 ring-rose-200 bg-rose-50/30 border-rose-200' : 'ring-2 ring-rose-500/30 bg-rose-500/5 border-rose-500/30';
-        const monoText = theme === 'light' ? 'text-gray-600 bg-gray-50 border-gray-100' : 'text-gray-300 bg-black/30 border-white/5';
-        const labelStyle = `text-[10px] font-bold uppercase tracking-widest ${theme === 'light' ? 'text-gray-400' : 'text-gray-500'}`;
+          const renderCardCol = (char: Character, other: Character, label: string) => (
+              <div className="flex flex-col gap-4">
+                  {/* Header */}
+                  <div className={`p-4 rounded-2xl border flex gap-4 items-start ${theme === 'light' ? 'bg-white border-gray-200' : 'bg-white/5 border-white/10'}`}>
+                      <img src={char.avatarUrl} alt={char.name} className="w-16 h-16 rounded-xl object-cover shrink-0" />
+                      <div className="flex-1 min-w-0">
+                          <div className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${theme === 'light' ? 'text-gray-400' : 'text-gray-500'}`}>{label}</div>
+                          <div className={`text-base font-black truncate ${theme === 'light' ? 'text-gray-800' : 'text-white'}`}>{char.name}</div>
+                          <div className={`text-xs font-mono truncate opacity-60`}>{char.originalFilename || 'unknown'}</div>
+                          {char.qrList && char.qrList.length > 0 && (
+                              <div className={`mt-1.5 inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md font-bold ${theme === 'light' ? 'bg-purple-50 text-purple-600 border border-purple-200' : 'bg-purple-500/20 text-purple-300 border border-purple-500/30'}`}>
+                                  ⚡ 有快速回复 ({char.qrList.length})
+                              </div>
+                          )}
+                          <div className="mt-3 flex gap-2">
+                              <Button
+                                  variant="danger"
+                                  onClick={() => {
+                                      if (window.confirm(`确定保留「${char.name}」并删除另一张吗?`)) {
+                                          const otherId = other.id;
+                                          onDelete(otherId);
+                                          setCompareModalOpen(false);
+                                          setSelectedIds(new Set());
+                                      }
+                                  }}
+                                  className="!py-1.5 !px-3 !text-xs !rounded-lg flex-1"
+                              >
+                                  保留此版本
+                              </Button>
+                          </div>
+                      </div>
+                  </div>
 
-        const handleKeepCard = (keepId: string) => {
-          const removeId = diffPair.find(c => c.id !== keepId)?.id;
-          if (removeId && window.confirm(`确定删除另一张卡片，只保留「${characters.find(c=>c.id===keepId)?.name}」吗？`)) {
-            deleteImage(removeId).catch(()=>{});
-            setCharacters(prev => prev.filter(c => c.id !== removeId));
-            setCompareModalOpen(false);
-            setIsSelectionMode(false);
-            setSelectedIds(new Set());
-          }
-        };
+                  {/* Description */}
+                  <div className={`p-4 rounded-2xl border ${ringClass((char.description||'').length, (other.description||'').length)} ${theme === 'light' ? 'bg-white border-gray-200' : 'bg-white/5 border-white/10'}`}>
+                      <div className="flex justify-between items-center mb-2">
+                          <span className={`text-[10px] font-bold uppercase tracking-widest ${theme === 'light' ? 'text-gray-400' : 'text-gray-500'}`}>Description 字数</span>
+                          <span className={`text-xl font-black font-mono ${diffClass((char.description||'').length, (other.description||'').length, char === charA)}`}>
+                              {(char.description||'').length}
+                          </span>
+                      </div>
+                      <div className={`h-36 overflow-y-auto custom-scrollbar text-xs leading-relaxed font-mono p-2.5 rounded-xl whitespace-pre-wrap ${theme === 'light' ? 'bg-gray-50 text-gray-600 border border-gray-100' : 'bg-black/20 text-gray-400'}`}>
+                          {char.description || '(无)'}
+                      </div>
+                  </div>
 
-        const handleTransferQR = (fromId: string, toId: string) => {
-          const fromChar = characters.find(c => c.id === fromId);
-          const toChar = characters.find(c => c.id === toId);
-          if (!fromChar || !toChar) return;
-          if (window.confirm(`将「${fromChar.name}」的 QR 配置转移到「${toChar.name}」？`)) {
-            onUpdate?.({ ...toChar, qrList: fromChar.qrList, extra_qr_data: fromChar.extra_qr_data });
-          }
-        };
+                  {/* First Message */}
+                  <div className={`p-4 rounded-2xl border ${ringClass((char.firstMessage||'').length, (other.firstMessage||'').length)} ${theme === 'light' ? 'bg-white border-gray-200' : 'bg-white/5 border-white/10'}`}>
+                      <div className="flex justify-between items-center mb-2">
+                          <span className={`text-[10px] font-bold uppercase tracking-widest ${theme === 'light' ? 'text-gray-400' : 'text-gray-500'}`}>First Message 字数</span>
+                          <span className={`text-xl font-black font-mono ${diffClass((char.firstMessage||'').length, (other.firstMessage||'').length, char === charA)}`}>
+                              {(char.firstMessage||'').length}
+                          </span>
+                      </div>
+                      <div className={`h-36 overflow-y-auto custom-scrollbar text-xs leading-relaxed font-mono p-2.5 rounded-xl whitespace-pre-wrap ${theme === 'light' ? 'bg-gray-50 text-gray-600 border border-gray-100' : 'bg-black/20 text-gray-400'}`}>
+                          {char.firstMessage || '(无)'}
+                      </div>
+                  </div>
 
-        const renderDiffCard = (char: Character, other: Character, label: string) => {
-          const dLen = (char.description||'').length;
-          const dOther = (other.description||'').length;
-          const fLen = (char.firstMessage||'').length;
-          const fOther = (other.firstMessage||'').length;
-          const pLen = (char.personality||'').length;
-          const pOther = (other.personality||'').length;
-          const wCount = char.character_book?.entries?.length || 0;
-          const wOther = other.character_book?.entries?.length || 0;
-          const wChars = (char.character_book?.entries || []).reduce((s,e)=>s+(e.content||'').length,0);
-          const wCharsOther = (other.character_book?.entries || []).reduce((s,e)=>s+(e.content||'').length,0);
-          const aCount = 1 + (char.alternate_greetings?.length || 0);
-          const aOther = 1 + (other.alternate_greetings?.length || 0);
-          const hasQr = char.qrList && char.qrList.length > 0;
-          const otherHasQr = other.qrList && other.qrList.length > 0;
-          const isA = label === 'A';
+                  {/* Greetings Count */}
+                  <div className={`p-4 rounded-2xl border ${theme === 'light' ? 'bg-white border-gray-200' : 'bg-white/5 border-white/10'}`}>
+                      <div className="flex justify-between items-center mb-2">
+                          <span className={`text-[10px] font-bold uppercase tracking-widest ${theme === 'light' ? 'text-gray-400' : 'text-gray-500'}`}>开场白数量</span>
+                          <span className="text-xl font-black font-mono text-green-500">{getFirstMesCount(char)}</span>
+                      </div>
+                      <div className="space-y-1.5">
+                          <div className={`p-2 rounded-lg text-xs flex justify-between ${ringClass((char.firstMessage||'').length, (other.firstMessage||'').length)} ${theme === 'light' ? 'bg-blue-50' : 'bg-blue-500/10'}`}>
+                              <span className={theme === 'light' ? 'font-bold text-gray-700' : 'font-bold text-gray-300'}>主开场白:</span>
+                              <span className={`font-bold ${diffClass((char.firstMessage||'').length, (other.firstMessage||'').length, char === charA)}`}>{(char.firstMessage||'').length} 字符</span>
+                          </div>
+                          {(char.alternate_greetings||[]).map((alt, idx) => (
+                              <div key={idx} className={`p-2 rounded-lg text-xs flex justify-between ${ringClass((alt||'').length, ((other.alternate_greetings||[])[idx]||'').length)} ${theme === 'light' ? 'bg-gray-50' : 'bg-white/5'}`}>
+                                  <span className="opacity-70">备用 #{idx+1}:</span>
+                                  <span className={`font-bold ${diffClass((alt||'').length, ((other.alternate_greetings||[])[idx]||'').length, char === charA)}`}>{(alt||'').length} 字符</span>
+                              </div>
+                          ))}
+                      </div>
+                  </div>
+
+                  {/* World Info */}
+                  <div className={`p-4 rounded-2xl border ${theme === 'light' ? 'bg-white border-gray-200' : 'bg-white/5 border-white/10'}`}>
+                      <div className="flex justify-between items-center mb-2">
+                          <span className={`text-[10px] font-bold uppercase tracking-widest ${theme === 'light' ? 'text-gray-400' : 'text-gray-500'}`}>世界书 (Lorebook)</span>
+                          <span className="text-xl font-black font-mono text-purple-500">{getWICount(char)} 条</span>
+                      </div>
+                      <div className={`p-3 rounded-xl ${theme === 'light' ? 'bg-purple-50' : 'bg-purple-500/10'}`}>
+                          <div className={`text-xs mb-1 ${theme === 'light' ? 'text-gray-600' : 'text-gray-400'}`}>总字符数:</div>
+                          <div className="text-2xl font-black text-purple-500">{getWIChars(char).toLocaleString()}</div>
+                      </div>
+                  </div>
+              </div>
+          );
 
           return (
-            <div className="flex flex-col gap-4">
-              {/* Header */}
-              <div className={`p-4 rounded-2xl border flex gap-4 items-start ${cardBg}`}>
-                <img src={char.avatarUrl} alt={char.name} className="w-16 h-16 rounded-xl object-cover shrink-0 bg-gray-900" />
-                <div className="flex-1 min-w-0">
-                  <div className={`text-[9px] font-bold uppercase tracking-widest mb-1 ${theme === 'light' ? 'text-gray-400' : 'text-gray-500'}`}>
-                    Card {label} {isA ? '(Left)' : '(Right)'}
-                  </div>
-                  <div className={`text-base font-black truncate ${theme === 'light' ? 'text-gray-900' : 'text-white'}`}>{char.name}</div>
-                  <div className={`text-[10px] font-mono truncate mt-0.5 ${theme === 'light' ? 'text-gray-400' : 'text-gray-500'}`}>{char.originalFilename || 'local_card.png'}</div>
-                  {hasQr && (
-                    <div className={`mt-2 inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-lg border font-bold ${theme === 'light' ? 'bg-purple-50 text-purple-600 border-purple-200' : 'bg-purple-500/10 text-purple-300 border-purple-500/20'}`}>
-                      <QrCode size={10} /> 含 QR ({char.qrList!.length})
-                    </div>
-                  )}
-                  <div className="mt-3 flex gap-2">
-                    {isA ? (
-                      <>
-                        <button onClick={() => handleKeepCard(char.id)} className={`flex-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${theme === 'light' ? 'bg-slate-800 hover:bg-rose-500 text-white shadow-lg' : 'bg-white/10 hover:bg-rose-500/80 text-white border border-white/10'}`}>保留此版本</button>
-                        {otherHasQr && <button onClick={() => handleTransferQR(other.id, char.id)} title="从右侧转移QR" className={`px-2.5 py-1.5 rounded-xl text-xs font-bold border transition-all ${theme === 'light' ? 'bg-purple-100 text-purple-700 border-purple-200 hover:bg-purple-200' : 'bg-purple-500/10 text-purple-300 border-purple-500/20 hover:bg-purple-500/20'}`}>← QR</button>}
-                      </>
-                    ) : (
-                      <>
-                        {otherHasQr && <button onClick={() => handleTransferQR(other.id, char.id)} title="从左侧转移QR" className={`px-2.5 py-1.5 rounded-xl text-xs font-bold border transition-all ${theme === 'light' ? 'bg-purple-100 text-purple-700 border-purple-200 hover:bg-purple-200' : 'bg-purple-500/10 text-purple-300 border-purple-500/20 hover:bg-purple-500/20'}`}>QR →</button>}
-                        <button onClick={() => handleKeepCard(char.id)} className={`flex-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${theme === 'light' ? 'bg-slate-800 hover:bg-rose-500 text-white shadow-lg' : 'bg-white/10 hover:bg-rose-500/80 text-white border border-white/10'}`}>保留此版本</button>
-                      </>
-                    )}
-                  </div>
+              <Modal
+                isOpen={compareModalOpen}
+                onClose={() => setCompareModalOpen(false)}
+                title="档案深度对比 (Diff Check)"
+                theme={theme}
+                maxWidth="max-w-5xl"
+              >
+                <div className="grid grid-cols-2 gap-6 max-h-[70vh] overflow-y-auto custom-scrollbar pr-1">
+                    {renderCardCol(charA, charB, 'Card A (Keep Left)')}
+                    {renderCardCol(charB, charA, 'Card B (Keep Right)')}
                 </div>
-              </div>
-
-              {/* Description */}
-              <div className={`p-4 rounded-2xl border transition-all ${isDiff(dLen, dOther) ? diffRing : cardBg}`}>
-                <div className="flex justify-between items-center mb-2">
-                  <span className={labelStyle}>Description 字数</span>
-                  <span className={`text-lg font-black font-mono ${dLen > dOther ? 'text-green-500' : dLen < dOther ? 'text-rose-400' : (theme==='light'?'text-gray-700':'text-gray-300')}`}>{dLen}</span>
+                <div className="flex justify-end mt-4">
+                    <Button onClick={() => setCompareModalOpen(false)} variant="primary">关闭</Button>
                 </div>
-                <div className={`h-36 overflow-y-auto custom-scrollbar text-[11px] leading-relaxed font-mono p-2.5 rounded-xl border whitespace-pre-wrap ${monoText}`}>{char.description || '（无）'}</div>
-              </div>
-
-              {/* Personality */}
-              <div className={`p-4 rounded-2xl border transition-all ${isDiff(pLen, pOther) ? diffRing : cardBg}`}>
-                <div className="flex justify-between items-center mb-2">
-                  <span className={labelStyle}>Personality 字数</span>
-                  <span className={`text-lg font-black font-mono ${pLen > pOther ? 'text-green-500' : pLen < pOther ? 'text-rose-400' : (theme==='light'?'text-gray-700':'text-gray-300')}`}>{pLen}</span>
-                </div>
-                <div className={`h-24 overflow-y-auto custom-scrollbar text-[11px] leading-relaxed font-mono p-2.5 rounded-xl border whitespace-pre-wrap ${monoText}`}>{char.personality || '（无）'}</div>
-              </div>
-
-              {/* First Message */}
-              <div className={`p-4 rounded-2xl border transition-all ${isDiff(fLen, fOther) ? diffRing : cardBg}`}>
-                <div className="flex justify-between items-center mb-2">
-                  <span className={labelStyle}>First Message 字数</span>
-                  <span className={`text-lg font-black font-mono ${fLen > fOther ? 'text-green-500' : fLen < fOther ? 'text-rose-400' : (theme==='light'?'text-gray-700':'text-gray-300')}`}>{fLen}</span>
-                </div>
-                <div className={`h-36 overflow-y-auto custom-scrollbar text-[11px] leading-relaxed font-mono p-2.5 rounded-xl border whitespace-pre-wrap ${monoText}`}>{char.firstMessage || '（无）'}</div>
-              </div>
-
-              {/* Greetings Count */}
-              <div className={`p-4 rounded-2xl border transition-all ${isDiff(aCount, aOther) ? diffRing : cardBg}`}>
-                <div className="flex justify-between items-center mb-3">
-                  <span className={labelStyle}>开场白数量</span>
-                  <span className={`text-lg font-black font-mono ${aCount > aOther ? 'text-green-500' : aCount < aOther ? 'text-rose-400' : 'text-blue-400'}`}>{aCount}</span>
-                </div>
-                <div className="space-y-1.5">
-                  <div className={`p-2 rounded-lg text-[11px] flex justify-between border ${isDiff(fLen, fOther) ? (theme==='light'?'bg-rose-50/50 border-rose-200':'bg-rose-500/5 border-rose-500/20') : (theme==='light'?'bg-blue-50 border-blue-100':'bg-blue-500/5 border-blue-500/10')}`}>
-                    <span className={theme==='light'?'text-gray-600 font-bold':'text-gray-400 font-bold'}>主开场白</span>
-                    <span className={`font-black ${fLen > fOther ? 'text-blue-500' : (theme==='light'?'text-gray-600':'text-gray-400')}`}>{fLen} 字符</span>
-                  </div>
-                  {(char.alternate_greetings || []).map((alt, idx) => {
-                    const altOtherLen = (other.alternate_greetings?.[idx] || '').length;
-                    return (
-                      <div key={idx} className={`p-2 rounded-lg text-[11px] flex justify-between border ${isDiff((alt||'').length, altOtherLen) ? (theme==='light'?'bg-rose-50/50 border-rose-200':'bg-rose-500/5 border-rose-500/20') : (theme==='light'?'bg-gray-50 border-gray-100':'bg-white/3 border-white/5')}`}>
-                        <span className={theme==='light'?'text-gray-500':'text-gray-500'}>备用 #{idx+1}</span>
-                        <span className={`font-black ${(alt||'').length > altOtherLen ? 'text-blue-500' : (theme==='light'?'text-gray-600':'text-gray-400')}`}>{(alt||'').length} 字符</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* World Book */}
-              <div className={`p-4 rounded-2xl border transition-all ${isDiff(wCount, wOther) || isDiff(wChars, wCharsOther) ? diffRing : cardBg}`}>
-                <div className="flex justify-between items-center mb-3">
-                  <span className={labelStyle}>世界书 (Lorebook)</span>
-                  <span className={`text-lg font-black font-mono ${wCount > wOther ? 'text-purple-400' : wCount < wOther ? 'text-rose-400' : (theme==='light'?'text-gray-700':'text-gray-300')}`}>{wCount} 条</span>
-                </div>
-                <div className={`p-3 rounded-xl ${theme==='light'?'bg-purple-50':'bg-purple-500/10'}`}>
-                  <div className={`text-[10px] mb-1 ${theme==='light'?'text-purple-400':'text-purple-400'}`}>总字符数:</div>
-                  <div className={`text-2xl font-black ${wChars > wCharsOther ? 'text-purple-500' : wChars < wCharsOther ? 'text-rose-400' : (theme==='light'?'text-purple-700':'text-purple-300')}`}>{wChars.toLocaleString()}</div>
-                </div>
-              </div>
-            </div>
+              </Modal>
           );
-        };
-
-        return createPortal(
-          <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-md flex items-center justify-center p-4">
-            <div className={`w-full max-w-5xl h-[90vh] rounded-[28px] shadow-2xl flex flex-col overflow-hidden border ${theme === 'light' ? 'bg-white border-gray-200' : 'bg-slate-900/95 border-white/10'}`}>
-              {/* Header */}
-              <div className={`px-6 py-4 border-b flex justify-between items-center shrink-0 ${theme === 'light' ? 'bg-gray-50 border-gray-100' : 'bg-black/20 border-white/10'}`}>
-                <div className="flex items-center gap-3">
-                  <GitCompare size={18} className="text-rose-500" />
-                  <span className={`font-black text-base ${theme === 'light' ? 'text-gray-800' : 'text-white'}`}>档案深度对比 (Diff Check)</span>
-                  <div className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${theme==='light'?'bg-rose-50 text-rose-500 border-rose-200':'bg-rose-500/10 text-rose-400 border-rose-500/20'}`}>BETA</div>
-                </div>
-                <button onClick={() => setCompareModalOpen(false)} className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors ${theme==='light'?'hover:bg-gray-200 text-gray-500':'hover:bg-white/10 text-gray-400'}`}>
-                  <X size={18} />
-                </button>
-              </div>
-              {/* Body */}
-              <div className={`flex-1 overflow-y-auto custom-scrollbar p-5 ${theme==='light'?'bg-slate-50/50':'bg-slate-950/30'}`}>
-                <div className="grid grid-cols-2 gap-5">
-                  {renderDiffCard(charA, charB, 'A')}
-                  {renderDiffCard(charB, charA, 'B')}
-                </div>
-              </div>
-            </div>
-          </div>,
-          document.body
-        );
       })()}
 
       {/* View Character Modal */}
@@ -1393,10 +1444,16 @@ const CharacterList: React.FC<CharacterListProps> = ({
                                 <FileText size={14} />
                                 <span className="truncate" title={viewCharacter.originalFilename}>{viewCharacter.originalFilename || "local_card.png"}</span>
                             </div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 mb-1">
                                 <span className="opacity-70">导入时间:</span>
                                 <span>{new Date(viewCharacter.importDate || 0).toLocaleString()}</span>
                             </div>
+                            {(viewCharacter as any).fileLastModified && (
+                                <div className="flex items-center gap-2 text-orange-400">
+                                    <span className="opacity-70">文件修改:</span>
+                                    <span className="font-semibold">{new Date((viewCharacter as any).fileLastModified).toLocaleString()}</span>
+                                </div>
+                            )}
                         </div>
 
                         <div className="flex gap-2 mt-auto pt-2">
@@ -1429,6 +1486,16 @@ const CharacterList: React.FC<CharacterListProps> = ({
                 </div>
 
                 <div className={`space-y-4 p-4 rounded-xl max-h-[400px] overflow-y-auto custom-scrollbar ${theme === 'light' ? 'bg-gray-50' : 'bg-white/5'}`}>
+                    {viewCharacter.creator_notes && (
+                        <div>
+                            <h4 className="font-bold opacity-70 mb-2 text-xs uppercase tracking-wider flex items-center gap-1.5">
+                                <span>👤</span> 作者备注 (Creator Notes)
+                            </h4>
+                            <div className={`p-3 rounded-xl text-xs leading-relaxed whitespace-pre-wrap ${theme === 'light' ? 'bg-amber-50 border border-amber-200 text-amber-900' : 'bg-amber-500/10 border border-amber-500/20 text-amber-200'}`}>
+                                {viewCharacter.creator_notes}
+                            </div>
+                        </div>
+                    )}
                     {viewCharacter.description && (
                         <div>
                             <h4 className="font-bold opacity-70 mb-2 text-xs uppercase tracking-wider">描述 (Description)</h4>

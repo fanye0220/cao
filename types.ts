@@ -47,6 +47,7 @@ export interface Character {
   folder?: string;
   importFormat?: 'png' | 'json' | 'unknown';
   updatedAt?: number;
+  fileLastModified?: number; // 文件的真实修改时间（来自file.lastModified）
 }
 
 export interface Message {

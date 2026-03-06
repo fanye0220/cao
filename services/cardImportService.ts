@@ -350,6 +350,7 @@ export const parseCharacterCard = async (file: File): Promise<Character> => {
     sourceUrl: finalData.sourceUrl || "",
     creator_notes: finalData.creator_notes || finalData.creatorcomment || "",
     importDate: Date.now(),
+    fileLastModified: file.lastModified || undefined,
     extra_qr_data: finalData.extra_qr_data, // Preserve if exists
     importFormat: 'png'
   };
@@ -407,6 +408,7 @@ export const parseCharacterJson = async (file: File): Promise<Character> => {
         sourceUrl: finalData.sourceUrl || "",
         creator_notes: finalData.creator_notes || finalData.creatorcomment || "",
         importDate: Date.now(),
+        fileLastModified: file.lastModified || undefined,
         extra_qr_data: finalData.extra_qr_data,
         importFormat: 'json'
     };
