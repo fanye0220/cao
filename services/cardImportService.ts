@@ -536,30 +536,60 @@ export const exportQrData = (qrList: any[], extraData: any = {}, originalFilenam
     downloadBlob(blob, filename);
 };
 
+/**
+ * 将图片 ArrayBuffer 转为纯 PNG 字节（若已是 PNG 则原样返回，
+ * 若是 JPEG/WebP 等则通过 canvas 转换为 PNG）。
+ */
+const ensurePngBuffer = async (blob: Blob): Promise<Uint8Array> => {
+  const ab = await blob.arrayBuffer();
+  const header = new Uint8Array(ab, 0, 8);
+  const PNG_SIG = [137, 80, 78, 71, 13, 10, 26, 10];
+  const isAlreadyPng = PNG_SIG.every((b, i) => header[i] === b);
+  if (isAlreadyPng) return new Uint8Array(ab);
+
+  // 非 PNG（如 JPEG）：通过 canvas 转为 PNG
+  const url = URL.createObjectURL(blob);
+  try {
+    const img = new Image();
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error("无法解码图片"));
+      img.src = url;
+    });
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext('2d')!;
+    ctx.drawImage(img, 0, 0);
+    const pngBlob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/png'));
+    if (!pngBlob) throw new Error("Canvas toBlob failed");
+    return new Uint8Array(await pngBlob.arrayBuffer());
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+};
+
 export const createTavernPng = async (character: Character): Promise<Blob> => {
-  // 1. Load image onto canvas
-  const img = new Image();
-  img.crossOrigin = "anonymous";
-  img.src = character.avatarUrl;
+  // 1. 优先从 IndexedDB 取原始文件 blob，保持图片字节完全不变（与 HTML 版行为一致）。
+  //    若 IDB 里没有（如新建卡或外部 URL），则回退到从 avatarUrl 加载。
+  let uint8Array: Uint8Array;
 
-  await new Promise((resolve, reject) => {
-    img.onload = resolve;
-    img.onerror = () => reject(new Error("无法加载图片，可能是跨域问题。请先上传一张本地图片作为头像。"));
-  });
+  const originalBlob = await loadImage(character.id).catch(() => undefined);
 
-  const canvas = document.createElement('canvas');
-  canvas.width = img.width;
-  canvas.height = img.height;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error("Canvas context failed");
-  ctx.drawImage(img, 0, 0);
-
-  // 2. Convert to Blob
-  const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
-  if (!blob) throw new Error("Failed to create PNG blob");
-
-  const arrayBuffer = await blob.arrayBuffer();
-  const uint8Array = new Uint8Array(arrayBuffer);
+  if (originalBlob) {
+    // 原始文件存在：直接用原始字节（PNG 原样，JPEG 则转为 PNG）
+    uint8Array = await ensurePngBuffer(originalBlob);
+  } else {
+    // 回退：从 avatarUrl 加载（blob URL 或外部 URL）
+    let sourceBlob: Blob;
+    try {
+      const resp = await fetch(character.avatarUrl);
+      sourceBlob = await resp.blob();
+    } catch {
+      throw new Error("无法加载图片，请先上传一张本地图片作为头像。");
+    }
+    uint8Array = await ensurePngBuffer(sourceBlob);
+  }
 
   // 3. Prepare Metadata — 直接复用 buildJsonExport 保证逻辑一致
   const exportData = buildJsonExport(character);
@@ -586,24 +616,42 @@ export const createTavernPng = async (character: Character): Promise<Blob> => {
   const crc = crc32(crcInput);
   view.setUint32(4 + 4 + chunkLength, crc);
 
-  // 5. Insert Chunk
-  let iendOffset = -1;
-  const len = uint8Array.length;
-  for (let i = 0; i < len - 7; i++) {
-    if (uint8Array[i] === 0x49 && uint8Array[i+1] === 0x45 && uint8Array[i+2] === 0x4e && uint8Array[i+3] === 0x44) {
-       iendOffset = i - 4;
-       break;
-    }
+  // 5. Rebuild PNG chunk-by-chunk, stripping existing chara tEXt/iTXt/zTXt chunks
+  //    to avoid duplicate chara chunks (ST reads the first it finds — old stale data wins).
+  const dv = new DataView(uint8Array.buffer, uint8Array.byteOffset, uint8Array.byteLength);
+  const keepChunks: Uint8Array[] = [];
+  keepChunks.push(uint8Array.slice(0, 8)); // PNG signature
+
+  let off = 8;
+  while (off + 12 <= uint8Array.length) {
+    const chunkLen = dv.getUint32(off);
+    const chunkType = String.fromCharCode(
+      uint8Array[off + 4], uint8Array[off + 5],
+      uint8Array[off + 6], uint8Array[off + 7]
+    );
+    const totalChunkSize = 12 + chunkLen;
+    if (chunkType === "IEND") break;
+
+    // Drop any existing chara metadata chunks
+    const isCharaChunk = (chunkType === "tEXt" || chunkType === "iTXt" || chunkType === "zTXt") &&
+      (() => {
+        const dataStart = off + 8;
+        let ni = dataStart;
+        while (ni < dataStart + chunkLen && uint8Array[ni] !== 0) ni++;
+        const kw = new TextDecoder().decode(uint8Array.slice(dataStart, ni));
+        return ["chara", "character", "ccv3"].includes(kw.toLowerCase());
+      })();
+
+    if (!isCharaChunk) keepChunks.push(uint8Array.slice(off, off + totalChunkSize));
+    off += totalChunkSize;
   }
 
-  if (iendOffset === -1) throw new Error("Invalid PNG: No IEND found");
+  // Append new tEXt chara chunk + IEND
+  const IEND = new Uint8Array([0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130]);
+  keepChunks.push(chunkBuffer);
+  keepChunks.push(IEND);
 
-  const finalBuffer = new Uint8Array(uint8Array.length + chunkBuffer.length);
-  finalBuffer.set(uint8Array.slice(0, iendOffset), 0);
-  finalBuffer.set(chunkBuffer, iendOffset);
-  finalBuffer.set(uint8Array.slice(iendOffset), iendOffset + chunkBuffer.length);
-
-  return new Blob([finalBuffer], { type: 'image/png' });
+  return new Blob(keepChunks, { type: 'image/png' });
 };
 
 export const exportCharacterData = async (character: Character, format: 'json' | 'png', forceZip: boolean = false) => {
