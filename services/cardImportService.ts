@@ -9,17 +9,16 @@ import { saveImage } from "./imageService";
  */
 const buildJsonExport = (character: Character): any => {
   const raw = character._rawCardData;
-  const finalQrList = (character.extra_qr_data?.qrList?.length > 0)
-    ? character.extra_qr_data.qrList
-    : (character.qrList || []);
 
   if (raw) {
     const isV2orV3 = raw.spec === 'chara_card_v2' || raw.spec === 'chara_card_v3';
     if (isV2orV3 && raw.data) {
+      // V2/V3：更新用户可编辑字段，其余原样保留，移除qrList（QR是独立文件）
+      const { qrList: _rq, ...restData } = raw.data;
       return {
         ...raw,
         data: {
-          ...raw.data,
+          ...restData,
           name: character.name,
           description: character.description,
           personality: character.personality,
@@ -29,12 +28,13 @@ const buildJsonExport = (character: Character): any => {
           character_book: character.character_book,
           tags: character.tags,
           creator_notes: character.creator_notes ?? raw.data.creator_notes ?? "",
-          qrList: finalQrList,
         }
       };
     } else {
+      // 旧版平铺格式
+      const { qrList: _rq, ...restRaw } = raw;
       return {
-        ...raw,
+        ...restRaw,
         name: character.name,
         description: character.description,
         personality: character.personality,
@@ -44,7 +44,6 @@ const buildJsonExport = (character: Character): any => {
         character_book: character.character_book,
         tags: character.tags,
         creator_notes: character.creator_notes ?? raw.creator_notes ?? "",
-        qrList: finalQrList,
       };
     }
   }
@@ -69,8 +68,6 @@ const buildJsonExport = (character: Character): any => {
       creator: "",
       character_version: "",
       extensions: {},
-      qrList: finalQrList,
-      sourceUrl: character.sourceUrl || "",
     }
   };
 };
@@ -517,11 +514,10 @@ export const parseQrFile = async (file: File): Promise<{ list: any[], raw: any }
   }
 };
 
-export const exportQrData = (qrList: any[], extraData: any = {}) => {
-    // 优先使用 extraData 里保存的原始完整 qrList（包含所有ST字段）
-    // 如果没有，才用传入的 qrList
+export const exportQrData = (qrList: any[], extraData: any = {}, originalFilename?: string) => {
+    // 完全用原始数据还原，只用传入qrList作为fallback
     const finalQrList = (extraData.qrList && extraData.qrList.length > 0) ? extraData.qrList : qrList;
-    const { qrList: _removed, ...restExtra } = extraData; // 剥离 extraData 里的 qrList，避免重复
+    const { qrList: _removed, ...restExtra } = extraData;
     const exportData = {
         version: 2,
         name: "QR Export",
@@ -530,11 +526,14 @@ export const exportQrData = (qrList: any[], extraData: any = {}) => {
         injectInput: false,
         color: "rgba(0, 0, 0, 0)",
         onlyBorderColor: false,
-        ...restExtra,
+        ...restExtra,   // 原始数据覆盖默认值（含原始name、injectInput等所有字段）
         qrList: finalQrList
     };
+    // 文件名：用原始导入文件名，没有则用原始name字段，再没有才用时间戳
+    const filename = originalFilename || 
+        (restExtra.name ? `${restExtra.name}.json` : `qr_export_${Date.now()}.json`);
     const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-    downloadBlob(blob, `qr_export_${Date.now()}.json`);
+    downloadBlob(blob, filename);
 };
 
 export const createTavernPng = async (character: Character): Promise<Blob> => {
@@ -562,74 +561,8 @@ export const createTavernPng = async (character: Character): Promise<Blob> => {
   const arrayBuffer = await blob.arrayBuffer();
   const uint8Array = new Uint8Array(arrayBuffer);
 
-  // 3. Prepare Metadata
-  // 优先从 _rawCardData 还原原始结构，只覆盖用户可能在管理器中编辑的字段
-  const raw = character._rawCardData;
-  let exportData: any;
-
-  if (raw) {
-    // 有原始数据：以原始结构为基础，覆盖用户可编辑的字段
-    const isV2orV3 = raw.spec === 'chara_card_v2' || raw.spec === 'chara_card_v3';
-    if (isV2orV3 && raw.data) {
-      // V2/V3 格式：更新 data 内的字段
-      exportData = {
-        ...raw,
-        data: {
-          ...raw.data,
-          name: character.name,
-          description: character.description,
-          personality: character.personality,
-          first_mes: character.firstMessage,
-          alternate_greetings: character.alternate_greetings,
-          scenario: character.scenario,
-          character_book: character.character_book,
-          tags: character.tags,
-          creator_notes: character.creator_notes || raw.data.creator_notes || "",
-          qrList: (character.extra_qr_data?.qrList?.length > 0) ? character.extra_qr_data.qrList : character.qrList,
-        }
-      };
-    } else {
-      // 旧版平铺格式
-      exportData = {
-        ...raw,
-        name: character.name,
-        description: character.description,
-        personality: character.personality,
-        first_mes: character.firstMessage,
-        alternate_greetings: character.alternate_greetings,
-        scenario: character.scenario,
-        character_book: character.character_book,
-        tags: character.tags,
-        creator_notes: character.creator_notes || raw.creator_notes || "",
-        qrList: (character.extra_qr_data?.qrList?.length > 0) ? character.extra_qr_data.qrList : character.qrList,
-      };
-    }
-  } else {
-    // 没有原始数据（新建卡或旧数据）：用标准 V2 格式
-    exportData = {
-      spec: "chara_card_v2",
-      spec_version: "2.0",
-      data: {
-        name: character.name,
-        description: character.description,
-        personality: character.personality,
-        first_mes: character.firstMessage,
-        alternate_greetings: character.alternate_greetings,
-        scenario: character.scenario,
-        character_book: character.character_book,
-        tags: character.tags,
-        mes_example: "",
-        creator_notes: character.creator_notes || "",
-        system_prompt: "",
-        post_history_instructions: "",
-        creator: "",
-        character_version: "",
-        extensions: {},
-        qrList: (character.extra_qr_data?.qrList?.length > 0) ? character.extra_qr_data.qrList : character.qrList,
-        sourceUrl: character.sourceUrl,
-      }
-    };
-  }
+  // 3. Prepare Metadata — 直接复用 buildJsonExport 保证逻辑一致
+  const exportData = buildJsonExport(character);
 
   const jsonStr = JSON.stringify(exportData);
   const base64Data = encodeBase64Utf8(jsonStr);
@@ -719,11 +652,19 @@ export const exportCharacterData = async (character: Character, format: 'json' |
       const finalQrList = (extra.qrList && extra.qrList.length > 0) ? extra.qrList : character.qrList;
       const qrExportData = {
         version: 2,
-        name: `${character.name} QR`,
-        ...restExtra,
+        name: "QR Export",
+        disableSend: false,
+        placeBeforeInput: false,
+        injectInput: false,
+        color: "rgba(0, 0, 0, 0)",
+        onlyBorderColor: false,
+        ...restExtra,   // 原始字段覆盖（含原始name、injectInput等）
         qrList: finalQrList
       };
-      zip.file(`${filenameBase}_qr.json`, JSON.stringify(qrExportData, null, 2));
+      // 用原始导入文件名，没有则用原始name字段
+      const qrFilename = character.qrFileName || 
+          (restExtra.name ? `${restExtra.name}.json` : `${filenameBase}_qr.json`);
+      zip.file(qrFilename, JSON.stringify(qrExportData, null, 2));
   }
 
   const content = await zip.generateAsync({ type: "blob" });
@@ -802,11 +743,18 @@ export const exportBulkCharacters = async (characters: Character[], collections:
                 const finalQrList = (extra.qrList && extra.qrList.length > 0) ? extra.qrList : char.qrList;
                 const qrExportData = {
                     version: 2,
-                    name: `${char.name} QR`,
-                    ...restExtra,
+                    name: "QR Export",
+                    disableSend: false,
+                    placeBeforeInput: false,
+                    injectInput: false,
+                    color: "rgba(0, 0, 0, 0)",
+                    onlyBorderColor: false,
+                    ...restExtra,   // 原始字段覆盖（含原始name、injectInput等）
                     qrList: finalQrList
                 };
-                const qrFilename = finalFilename.replace(/\.[^/.]+$/, "") + "_qr.json";
+                // 用原始导入文件名，没有则用原始name字段
+                const qrFilename = char.qrFileName ||
+                    (restExtra.name ? `${restExtra.name}.json` : finalFilename.replace(/\.[^/.]+$/, "") + "_qr.json");
                 charFolder.file(qrFilename, JSON.stringify(qrExportData, null, 2));
             }
         } else {

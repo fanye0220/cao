@@ -28,12 +28,26 @@ export interface CharacterBookEntry {
   priority?: number;
   id?: number;
   comment?: string;
+  // ST完整字段
+  secondary_keys?: string[];
+  constant?: boolean;
+  selective?: boolean;
+  position?: string;
+  use_regex?: boolean;
+  extensions?: Record<string, any>;
+  [key: string]: any; // 兼容未来新增字段
 }
 
 export interface CharacterBook {
   name?: string;
   description?: string;
   entries: CharacterBookEntry[];
+  // ST完整字段
+  scan_depth?: number;
+  token_budget?: number;
+  recursive_scanning?: boolean;
+  extensions?: Record<string, any>;
+  [key: string]: any;
 }
 
 export interface Character {

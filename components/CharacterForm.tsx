@@ -116,7 +116,7 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
           alert("没有可导出的 QR 数据");
           return;
       }
-      exportQrData(formData.qrList, formData.extra_qr_data);
+      exportQrData(formData.qrList, formData.extra_qr_data, (formData as any).qrFileName);
   };
 
   const handleClearQr = () => {
