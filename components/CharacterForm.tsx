@@ -28,10 +28,11 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
     originalFilename: '',
     sourceUrl: '',
     cardUrl: initialData?.cardUrl || initialData?.originalFilename || '',
-    extra_qr_data: {}
+    extra_qr_data: {},
+    qrFileName: ''
   });
   
-  const [qrFileName, setQrFileName] = useState<string>(initialData?.qrList && initialData.qrList.length > 0 ? 'imported_config.json' : '');
+  // qrFileName is stored in formData (not a separate state) so it persists correctly on save.
   
   // First Message Modal State
   const [showFirstMesModal, setShowFirstMesModal] = useState(false);
@@ -211,6 +212,10 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
       character_book: formData.character_book,
       tags: formData.tags || [],
       qrList: formData.qrList || [],
+      // extra_qr_data and qrFileName must be taken from formData (not initialData),
+      // because they can be updated in-form via handleQrFileImport / handleClearQr.
+      extra_qr_data: formData.extra_qr_data ?? initialData?.extra_qr_data,
+      qrFileName: (formData as any).qrFileName ?? initialData?.qrFileName,
       originalFilename: formData.originalFilename,
       sourceUrl: formData.sourceUrl || '',
       cardUrl: formData.cardUrl || '',
