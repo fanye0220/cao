@@ -26,8 +26,10 @@ interface CharacterListProps {
 interface ImportResults {
   success: number;
   failed: number;
-  failedFiles: string[];
-  duplicates: string[];
+  failedCards: string[];   // 角色卡解析失败（文件名）
+  failedQr: string[];      // 误传QR文件（文件名）
+  failedJpeg: string[];    // JPEG/非PNG图片（文件名）
+  duplicates: string[];    // 重复角色名
 }
 
 const CharacterList: React.FC<CharacterListProps> = ({ 
@@ -435,7 +437,9 @@ const CharacterList: React.FC<CharacterListProps> = ({
 
     let successCount = 0;
     let failCount = 0;
-    const failedFiles: string[] = [];
+    const failedCards: string[] = [];
+    const failedQr: string[] = [];
+    const failedJpeg: string[] = [];
     const duplicates: string[] = [];
     const fileArray = Array.from(files) as File[];
     const validChars: Character[] = [];
@@ -465,9 +469,8 @@ const CharacterList: React.FC<CharacterListProps> = ({
             const PNG_SIG = [137, 80, 78, 71, 13, 10, 26, 10];
             const isRealPng = PNG_SIG.every((b, i) => bytes[i] === b);
             if (!isRealPng) {
-                // JPEG 或其他图片格式，跳过（不是角色卡）
                 failCount++;
-                failedFiles.push(`${file.name}: 不是有效的角色卡 PNG（可能是 JPEG 头像图片）`);
+                failedJpeg.push(file.name);
                 continue;
             }
         }
@@ -478,7 +481,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
             let jsonData: any;
             try { jsonData = JSON.parse(text); } catch {
                 failCount++;
-                failedFiles.push(`${file.name}: JSON 解析失败`);
+                failedCards.push(file.name);
                 continue;
             }
             // 判断是否是 QR 文件（有 qrList 数组但没有角色卡特征）
@@ -487,7 +490,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
                              jsonData?.first_mes === undefined;
             if (isQrFile) {
                 failCount++;
-                failedFiles.push(`${file.name}: 这是 QR 配置文件，请在角色编辑页面绑定 QR`);
+                failedQr.push(file.name);
                 continue;
             }
         }
@@ -512,7 +515,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
       } catch (err: any) {
         console.error(`Failed to import ${file.name}:`, err);
         failCount++;
-        failedFiles.push(`${file.name}: ${err.message}`);
+        failedCards.push(file.name);
       }
     }
 
@@ -526,7 +529,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
 
     setImportingCount(0);
     if (failCount > 0 || (duplicates.length > 0 && files.length > 1)) {
-        setImportResults({ success: successCount, failed: failCount, failedFiles, duplicates });
+        setImportResults({ success: successCount, failed: failCount, failedCards, failedQr, failedJpeg, duplicates });
         setImportErrorModalOpen(true);
     } else if (files.length > 1) {
         // Optional: show success toast for bulk import
@@ -1267,56 +1270,88 @@ const CharacterList: React.FC<CharacterListProps> = ({
         title="导入结果"
         theme={theme}
       >
-        <div className="space-y-4">
-          <div className="flex items-center gap-4 text-sm">
-             <div className="flex items-center gap-1 text-green-500 font-bold">
-                <Check size={16} /> 成功: {importResults?.success}
-             </div>
-             {importResults && importResults.failed > 0 && (
-                 <div className="flex items-center gap-1 text-red-500 font-bold">
-                    <AlertCircle size={16} /> 失败: {importResults?.failed}
-                 </div>
-             )}
-             {importResults && importResults.duplicates.length > 0 && (
-                 <div className="flex items-center gap-1 text-yellow-500 font-bold">
-                    <AlertTriangle size={16} /> 重复: {importResults?.duplicates.length}
-                 </div>
-             )}
-          </div>
-          
-          {importResults && (importResults as ImportResults).failedFiles.length > 0 && (
-            <div className="mt-4">
-              <h4 className="font-semibold mb-2 text-sm uppercase tracking-wider opacity-70">失败文件详情</h4>
-              <div className={`rounded-lg p-3 text-sm font-mono overflow-x-auto max-h-32 overflow-y-auto custom-scrollbar ${theme === 'light' ? 'bg-red-50 text-red-800' : 'bg-red-900/20 text-red-200'}`}>
-                <ul className="list-disc list-inside space-y-1">
-                  {(importResults as ImportResults).failedFiles.map((msg, idx) => (
-                    <li key={idx} className="break-all">{msg}</li>
-                  ))}
-                </ul>
-              </div>
+        {importResults && (
+          <div className="space-y-3">
+            {/* 统计行 */}
+            <div className={`flex items-center gap-3 text-xs font-bold pb-3 border-b ${theme === 'light' ? 'border-slate-100' : 'border-white/10'}`}>
+              {importResults.success > 0 && (
+                <span className="flex items-center gap-1 text-green-500">
+                  <Check size={13}/> 成功 {importResults.success}
+                </span>
+              )}
+              {importResults.failed > 0 && (
+                <span className="flex items-center gap-1 text-red-400">
+                  <AlertCircle size={13}/> 失败 {importResults.failed}
+                </span>
+              )}
+              {importResults.duplicates.length > 0 && (
+                <span className="flex items-center gap-1 text-yellow-400">
+                  <AlertTriangle size={13}/> 重复 {importResults.duplicates.length}
+                </span>
+              )}
             </div>
-          )}
 
-          {importResults && (importResults as ImportResults).duplicates.length > 0 && (
-            <div className="mt-4">
-              <h4 className="font-semibold mb-2 text-sm uppercase tracking-wider opacity-70">重复角色 (已导入)</h4>
-              <div className={`rounded-lg p-3 text-sm font-mono overflow-x-auto max-h-32 overflow-y-auto custom-scrollbar ${theme === 'light' ? 'bg-yellow-50 text-yellow-800' : 'bg-yellow-900/20 text-yellow-200'}`}>
-                <p className="mb-2 text-xs opacity-70">以下角色名称已存在，但仍已导入为新卡片：</p>
-                <ul className="list-disc list-inside space-y-1">
-                  {(importResults as ImportResults).duplicates.map((name, idx) => (
-                    <li key={idx} className="break-all">{name}</li>
+            {/* 角色卡解析失败 */}
+            {importResults.failedCards.length > 0 && (
+              <div>
+                <div className={`text-[10px] font-black uppercase tracking-widest mb-1.5 flex items-center gap-1.5 ${theme === 'light' ? 'text-red-400' : 'text-red-400'}`}>
+                  <AlertCircle size={11}/> 角色卡解析失败
+                </div>
+                <div className={`rounded-xl p-2.5 space-y-1 max-h-36 overflow-y-auto custom-scrollbar ${theme === 'light' ? 'bg-red-50' : 'bg-red-500/10'}`}>
+                  {importResults.failedCards.map((name, i) => (
+                    <div key={i} className={`text-xs font-mono truncate px-1 ${theme === 'light' ? 'text-red-700' : 'text-red-300'}`}>{name}</div>
                   ))}
-                </ul>
+                </div>
               </div>
+            )}
+
+            {/* QR配置文件 */}
+            {importResults.failedQr.length > 0 && (
+              <div>
+                <div className={`text-[10px] font-black uppercase tracking-widest mb-1.5 flex items-center gap-1.5 ${theme === 'light' ? 'text-purple-400' : 'text-purple-400'}`}>
+                  <AlertTriangle size={11}/> QR 配置文件（请在角色编辑页绑定）
+                </div>
+                <div className={`rounded-xl p-2.5 space-y-1 max-h-36 overflow-y-auto custom-scrollbar ${theme === 'light' ? 'bg-purple-50' : 'bg-purple-500/10'}`}>
+                  {importResults.failedQr.map((name, i) => (
+                    <div key={i} className={`text-xs font-mono truncate px-1 ${theme === 'light' ? 'text-purple-700' : 'text-purple-300'}`}>{name}</div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* JPEG/非PNG图片 */}
+            {importResults.failedJpeg.length > 0 && (
+              <div>
+                <div className={`text-[10px] font-black uppercase tracking-widest mb-1.5 flex items-center gap-1.5 ${theme === 'light' ? 'text-orange-400' : 'text-orange-400'}`}>
+                  <AlertTriangle size={11}/> 非角色卡图片（JPEG 等）
+                </div>
+                <div className={`rounded-xl p-2.5 space-y-1 max-h-36 overflow-y-auto custom-scrollbar ${theme === 'light' ? 'bg-orange-50' : 'bg-orange-500/10'}`}>
+                  {importResults.failedJpeg.map((name, i) => (
+                    <div key={i} className={`text-xs font-mono truncate px-1 ${theme === 'light' ? 'text-orange-700' : 'text-orange-300'}`}>{name}</div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 重复角色 */}
+            {importResults.duplicates.length > 0 && (
+              <div>
+                <div className={`text-[10px] font-black uppercase tracking-widest mb-1.5 flex items-center gap-1.5 ${theme === 'light' ? 'text-yellow-500' : 'text-yellow-400'}`}>
+                  <Copy size={11}/> 重复角色（已导入）
+                </div>
+                <div className={`rounded-xl p-2.5 space-y-1 max-h-36 overflow-y-auto custom-scrollbar ${theme === 'light' ? 'bg-yellow-50' : 'bg-yellow-500/10'}`}>
+                  {importResults.duplicates.map((name, i) => (
+                    <div key={i} className={`text-xs font-mono truncate px-1 ${theme === 'light' ? 'text-yellow-700' : 'text-yellow-300'}`}>{name}</div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end pt-2">
+              <Button onClick={() => setImportErrorModalOpen(false)} variant="primary">确认</Button>
             </div>
-          )}
-          
-          <div className="flex justify-end mt-6">
-            <Button onClick={() => setImportErrorModalOpen(false)} variant="primary">
-              确认
-            </Button>
           </div>
-        </div>
+        )}
       </Modal>
 
       {/* Compare Modal */}
