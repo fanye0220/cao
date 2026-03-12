@@ -620,22 +620,20 @@ const CharacterList: React.FC<CharacterListProps> = ({
   const handleSingleExport = async (char: Character, format: 'json' | 'png') => {
     setExportMenuCharId(null);
     
-    // Check if trying to export PNG from a JSON-imported character (or one without a proper avatar)
-    if (format === 'png' && char.importFormat === 'json') {
-        // We can check if the avatar is a blob URL (which means they uploaded one) or a picsum URL (placeholder)
-        // If it's a placeholder, we should definitely warn.
-        if (char.avatarUrl.includes('picsum.photos')) {
-             if (!window.confirm("该角色是通过 JSON 导入的，且似乎没有上传自定义头像（当前是随机占位图）。\n导出 PNG 会将数据嵌入到这张占位图中。\n\n确定要继续吗？建议先在编辑页面上传一张图片。")) {
-                 return;
-             }
+    // 导出 PNG 时检查是否有头像图片
+    if (format === 'png') {
+        const hasNoImage = !char.avatarUrl || char.avatarUrl.includes('picsum.photos');
+        if (hasNoImage && char.importFormat === 'json') {
+            alert("该角色通过 JSON 导入，尚未上传头像。\n请先点击角色卡进入编辑页面，在头像区域上传一张本地图片，再导出 PNG。");
+            return;
         }
     }
 
     try {
       await exportCharacterData(char, format);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Export failed", err);
-      setError("导出失败");
+      setError(err?.message || "导出失败");
     }
   };
 

@@ -200,7 +200,7 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
 
   // Construct the full character object for saving/exporting
   const getFullCharacter = (): Character => ({
-      ...initialData,
+      ...initialData,          // 保留所有原始字段（含 _rawCardData、importFormat、note 等）
       id: initialData?.id || crypto.randomUUID(),
       name: formData.name || "Unknown",
       description: formData.description || '',
@@ -220,9 +220,13 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
       sourceUrl: formData.sourceUrl || '',
       cardUrl: formData.cardUrl || '',
       creator_notes: formData.creator_notes || '',
+      note: (formData as any).note ?? initialData?.note ?? '', // 备注字段
+      // 关键：必须显式保留这两个字段，否则编辑后导出会丢失原始结构
+      _rawCardData: initialData?._rawCardData,
+      importFormat: initialData?.importFormat,
       fileLastModified: (formData as any).fileLastModified,
-      updatedAt: Date.now(), // Add updatedAt for sorting
-      importDate: initialData?.importDate || Date.now() // Preserve or set importDate
+      updatedAt: Date.now(),
+      importDate: initialData?.importDate || Date.now()
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -258,13 +262,12 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
           targetFormat = exportType;
       }
 
-      // Check if trying to export PNG from a JSON-imported character (or one without a proper avatar)
-      if (targetFormat === 'png' && char.importFormat === 'json') {
-          // Check if user has uploaded a new avatar (blob url) or still using placeholder
-          if (formData.avatarUrl?.includes('picsum.photos')) {
-               if (!window.confirm("该角色是通过 JSON 导入的，且似乎没有上传自定义头像（当前是随机占位图）。\n导出 PNG 会将数据嵌入到这张占位图中。\n\n确定要继续吗？建议先在编辑页面上传一张图片。")) {
-                   return;
-               }
+      // 导出 PNG 时检查是否有头像图片
+      if (targetFormat === 'png') {
+          const hasNoImage = !char.avatarUrl || char.avatarUrl.includes('picsum.photos');
+          if (hasNoImage) {
+              alert("尚未上传头像。请先在头像区域上传一张本地图片，再导出 PNG。");
+              return;
           }
       }
 
