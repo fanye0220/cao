@@ -75,6 +75,7 @@ export interface Character {
   importFormat?: 'png' | 'json' | 'unknown';
   updatedAt?: number;
   fileLastModified?: number;
+  note?: string; // 备注字段（原帖链接等），对应 HTML 版 card.note，导出时写入 data.note
 }
 
 export interface Message {

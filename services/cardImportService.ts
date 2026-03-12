@@ -28,6 +28,7 @@ const buildJsonExport = (character: Character): any => {
           character_book: character.character_book,
           tags: character.tags,
           creator_notes: character.creator_notes ?? raw.data.creator_notes ?? "",
+          note: character.note ?? restData.note ?? "", // 同步 note 字段（对应 HTML 版 card.note）
         }
       };
     } else {
@@ -44,6 +45,7 @@ const buildJsonExport = (character: Character): any => {
         character_book: character.character_book,
         tags: character.tags,
         creator_notes: character.creator_notes ?? raw.creator_notes ?? "",
+        note: character.note ?? restRaw.note ?? "", // 同步 note 字段
       };
     }
   }
@@ -68,6 +70,7 @@ const buildJsonExport = (character: Character): any => {
       creator: "",
       character_version: "",
       extensions: {},
+      note: character.note || "", // 备注字段
     }
   };
 };
@@ -419,6 +422,7 @@ export const parseCharacterCard = async (file: File): Promise<Character> => {
     originalFilename: file.name,
     sourceUrl: finalData.sourceUrl || "",
     creator_notes: finalData.creator_notes || finalData.creatorcomment || "",
+    note: finalData.note || "", // 备注字段，对应 HTML 版 card.note
     importDate: Date.now(),
     fileLastModified: file.lastModified || undefined,
     extra_qr_data: finalData.extra_qr_data,
@@ -478,6 +482,7 @@ export const parseCharacterJson = async (file: File): Promise<Character> => {
         originalFilename: file.name,
         sourceUrl: finalData.sourceUrl || "",
         creator_notes: finalData.creator_notes || finalData.creatorcomment || "",
+        note: finalData.note || "", // 备注字段，对应 HTML 版 card.note
         importDate: Date.now(),
         fileLastModified: file.lastModified || undefined,
         extra_qr_data: finalData.extra_qr_data,

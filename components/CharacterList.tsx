@@ -484,13 +484,20 @@ const CharacterList: React.FC<CharacterListProps> = ({
                 failedCards.push(file.name);
                 continue;
             }
-            // 判断是否是 QR 文件（有 qrList 数组但没有角色卡特征）
-            const isQrFile = Array.isArray(jsonData?.qrList) && 
-                             !jsonData?.spec?.startsWith('chara_card') &&
-                             jsonData?.first_mes === undefined;
+            // 判断是否是 QR 文件（有 qrList/quickReplySlots 但没有角色卡特征）
+            // 对应 HTML 版：raw.qrList || raw.quickReplySlots || (raw.data && ...)
+            const isQrFile = (
+                Array.isArray(jsonData?.qrList) || 
+                Array.isArray(jsonData?.quickReplySlots) ||
+                Array.isArray(jsonData?.data?.qrList) ||
+                Array.isArray(jsonData?.data?.quickReplySlots)
+            ) && 
+                !jsonData?.spec?.startsWith('chara_card') &&
+                jsonData?.first_mes === undefined &&
+                jsonData?.data?.first_mes === undefined;
             if (isQrFile) {
-                failCount++;
-                failedQr.push(file.name);
+                // HTML 版会将 QR 文件加入全局 QR 池；
+                // 此版本架构不同（QR 内嵌到角色），静默跳过，不算导入失败
                 continue;
             }
         }
