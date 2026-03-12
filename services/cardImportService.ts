@@ -1,6 +1,6 @@
 import { Character } from "../types";
 import JSZip from "jszip";
-import { saveImage, loadImage } from "./imageService";
+import { saveImage } from "./imageService";
 
 /**
  * 将内部 Character 对象还原为标准 ST 角色卡 JSON 格式。
@@ -28,7 +28,8 @@ const buildJsonExport = (character: Character): any => {
           character_book: character.character_book,
           tags: character.tags,
           creator_notes: character.creator_notes ?? raw.data.creator_notes ?? "",
-          note: character.note ?? restData.note ?? "", // 同步 note 字段（对应 HTML 版 card.note）
+          // 保留 note 字段（备注/原帖链接）
+          ...(character.note !== undefined ? { note: character.note } : {}),
         }
       };
     } else {
@@ -45,7 +46,7 @@ const buildJsonExport = (character: Character): any => {
         character_book: character.character_book,
         tags: character.tags,
         creator_notes: character.creator_notes ?? raw.creator_notes ?? "",
-        note: character.note ?? restRaw.note ?? "", // 同步 note 字段
+        ...(character.note !== undefined ? { note: character.note } : {}),
       };
     }
   }
@@ -70,7 +71,7 @@ const buildJsonExport = (character: Character): any => {
       creator: "",
       character_version: "",
       extensions: {},
-      note: character.note || "", // 备注字段
+      ...(character.note !== undefined ? { note: character.note } : {}),
     }
   };
 };
@@ -422,12 +423,12 @@ export const parseCharacterCard = async (file: File): Promise<Character> => {
     originalFilename: file.name,
     sourceUrl: finalData.sourceUrl || "",
     creator_notes: finalData.creator_notes || finalData.creatorcomment || "",
-    note: finalData.note || "", // 备注字段，对应 HTML 版 card.note
     importDate: Date.now(),
     fileLastModified: file.lastModified || undefined,
     extra_qr_data: finalData.extra_qr_data,
     _rawCardData: characterData, // 保存完整原始数据（含spec/spec_version/data及所有字段）
-    importFormat: 'png'
+    importFormat: 'png',
+    note: finalData.note || "",  // 保存备注/原帖链接字段
   };
 };
 
@@ -462,9 +463,10 @@ export const parseCharacterJson = async (file: File): Promise<Character> => {
     }
 
     const id = crypto.randomUUID();
-    // JSON 导入没有附带图片，avatarUrl 设为空字符串
-    // 用户需在编辑页面手动上传头像才能导出为 PNG
-    const avatarUrl = ``;
+    // Use a default placeholder or try to use a provided image URL if valid (unlikely to be local)
+    // We will use a placeholder and NOT save to IDB yet (or save the placeholder?)
+    // Let's use a placeholder.
+    const avatarUrl = `https://picsum.photos/seed/${id}/400/400`; 
 
     return {
         id: id,
@@ -481,12 +483,12 @@ export const parseCharacterJson = async (file: File): Promise<Character> => {
         originalFilename: file.name,
         sourceUrl: finalData.sourceUrl || "",
         creator_notes: finalData.creator_notes || finalData.creatorcomment || "",
-        note: finalData.note || "", // 备注字段，对应 HTML 版 card.note
         importDate: Date.now(),
         fileLastModified: file.lastModified || undefined,
         extra_qr_data: finalData.extra_qr_data,
         _rawCardData: data, // 保存完整原始数据（含spec/spec_version/顶层遗留字段等）
-        importFormat: 'json'
+        importFormat: 'json',
+        note: finalData.note || "",  // 保存备注/原帖链接字段
     };
 };
 
@@ -574,7 +576,8 @@ const ensurePngBuffer = async (blob: Blob): Promise<Uint8Array> => {
 };
 
 export const createTavernPng = async (character: Character): Promise<Blob> => {
-  // 1. 优先从 IndexedDB 取原始文件 blob（PNG/JSON 导入时均已存图）
+  // 1. 优先从 IndexedDB 取原始文件 blob，保持图片字节完全不变（与 HTML 版行为一致）。
+  //    若 IDB 里没有（如新建卡或外部 URL），则回退到从 avatarUrl 加载。
   let uint8Array: Uint8Array;
 
   const originalBlob = await loadImage(character.id).catch(() => undefined);
@@ -583,23 +586,13 @@ export const createTavernPng = async (character: Character): Promise<Blob> => {
     // 原始文件存在：直接用原始字节（PNG 原样，JPEG 则转为 PNG）
     uint8Array = await ensurePngBuffer(originalBlob);
   } else {
-    // 没有 IDB 图片（JSON 导入 + 未手动上传头像）：尝试从 avatarUrl 加载
-    if (!character.avatarUrl) {
-      throw new Error("该角色通过 JSON 导入，尚未上传头像。请先在编辑页面点击头像区域上传一张本地图片，再导出 PNG。");
-    }
-    let sourceBlob: Blob | undefined;
+    // 回退：从 avatarUrl 加载（blob URL 或外部 URL）
+    let sourceBlob: Blob;
     try {
       const resp = await fetch(character.avatarUrl);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       sourceBlob = await resp.blob();
     } catch {
-      // 如果 avatarUrl 是占位图（picsum）也加载失败，给出明确提示
-      const isPlaceholder = character.avatarUrl?.includes('picsum.photos');
-      throw new Error(
-        isPlaceholder
-          ? "该角色通过 JSON 导入，尚未上传头像。请先在编辑页面点击头像区域上传一张本地图片，再导出 PNG。"
-          : "无法加载角色头像图片，请检查网络或重新上传头像。"
-      );
+      throw new Error("无法加载图片，请先上传一张本地图片作为头像。");
     }
     uint8Array = await ensurePngBuffer(sourceBlob);
   }

@@ -484,20 +484,13 @@ const CharacterList: React.FC<CharacterListProps> = ({
                 failedCards.push(file.name);
                 continue;
             }
-            // 判断是否是 QR 文件（有 qrList/quickReplySlots 但没有角色卡特征）
-            // 对应 HTML 版：raw.qrList || raw.quickReplySlots || (raw.data && ...)
-            const isQrFile = (
-                Array.isArray(jsonData?.qrList) || 
-                Array.isArray(jsonData?.quickReplySlots) ||
-                Array.isArray(jsonData?.data?.qrList) ||
-                Array.isArray(jsonData?.data?.quickReplySlots)
-            ) && 
-                !jsonData?.spec?.startsWith('chara_card') &&
-                jsonData?.first_mes === undefined &&
-                jsonData?.data?.first_mes === undefined;
+            // 判断是否是 QR 文件（有 qrList 数组但没有角色卡特征）
+            const isQrFile = Array.isArray(jsonData?.qrList) && 
+                             !jsonData?.spec?.startsWith('chara_card') &&
+                             jsonData?.first_mes === undefined;
             if (isQrFile) {
-                // HTML 版会将 QR 文件加入全局 QR 池；
-                // 此版本架构不同（QR 内嵌到角色），静默跳过，不算导入失败
+                failCount++;
+                failedQr.push(file.name);
                 continue;
             }
         }
@@ -620,20 +613,22 @@ const CharacterList: React.FC<CharacterListProps> = ({
   const handleSingleExport = async (char: Character, format: 'json' | 'png') => {
     setExportMenuCharId(null);
     
-    // 导出 PNG 时检查是否有头像图片
-    if (format === 'png') {
-        const hasNoImage = !char.avatarUrl || char.avatarUrl.includes('picsum.photos');
-        if (hasNoImage && char.importFormat === 'json') {
-            alert("该角色通过 JSON 导入，尚未上传头像。\n请先点击角色卡进入编辑页面，在头像区域上传一张本地图片，再导出 PNG。");
-            return;
+    // Check if trying to export PNG from a JSON-imported character (or one without a proper avatar)
+    if (format === 'png' && char.importFormat === 'json') {
+        // We can check if the avatar is a blob URL (which means they uploaded one) or a picsum URL (placeholder)
+        // If it's a placeholder, we should definitely warn.
+        if (char.avatarUrl.includes('picsum.photos')) {
+             if (!window.confirm("该角色是通过 JSON 导入的，且似乎没有上传自定义头像（当前是随机占位图）。\n导出 PNG 会将数据嵌入到这张占位图中。\n\n确定要继续吗？建议先在编辑页面上传一张图片。")) {
+                 return;
+             }
         }
     }
 
     try {
       await exportCharacterData(char, format);
-    } catch (err: any) {
+    } catch (err) {
       console.error("Export failed", err);
-      setError(err?.message || "导出失败");
+      setError("导出失败");
     }
   };
 
@@ -1542,6 +1537,18 @@ const CharacterList: React.FC<CharacterListProps> = ({
                                 <div className={`flex items-center gap-2 ${theme === 'light' ? 'text-gray-600' : 'text-gray-400'}`}>
                                     <span className="opacity-70">文件修改:</span>
                                     <span>{new Date((viewCharacter as any).fileLastModified).toLocaleString()}</span>
+                                </div>
+                            )}
+                            {viewCharacter.note && (
+                                <div className={`mt-2 flex items-start gap-2 ${theme === 'light' ? 'text-gray-600' : 'text-gray-400'}`}>
+                                    <span className="opacity-70 shrink-0">备注:</span>
+                                    {/^https?:\/\//.test(viewCharacter.note) ? (
+                                        <a href={viewCharacter.note} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 truncate underline" title={viewCharacter.note}>
+                                            {viewCharacter.note}
+                                        </a>
+                                    ) : (
+                                        <span className="break-all">{viewCharacter.note}</span>
+                                    )}
                                 </div>
                             )}
                         </div>

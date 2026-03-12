@@ -29,7 +29,8 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
     sourceUrl: '',
     cardUrl: initialData?.cardUrl || initialData?.originalFilename || '',
     extra_qr_data: {},
-    qrFileName: ''
+    qrFileName: '',
+    note: initialData?.note || '',
   });
   
   // qrFileName is stored in formData (not a separate state) so it persists correctly on save.
@@ -200,7 +201,7 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
 
   // Construct the full character object for saving/exporting
   const getFullCharacter = (): Character => ({
-      ...initialData,          // 保留所有原始字段（含 _rawCardData、importFormat、note 等）
+      ...initialData,
       id: initialData?.id || crypto.randomUUID(),
       name: formData.name || "Unknown",
       description: formData.description || '',
@@ -220,13 +221,10 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
       sourceUrl: formData.sourceUrl || '',
       cardUrl: formData.cardUrl || '',
       creator_notes: formData.creator_notes || '',
-      note: (formData as any).note ?? initialData?.note ?? '', // 备注字段
-      // 关键：必须显式保留这两个字段，否则编辑后导出会丢失原始结构
-      _rawCardData: initialData?._rawCardData,
-      importFormat: initialData?.importFormat,
+      note: (formData as any).note || '',
       fileLastModified: (formData as any).fileLastModified,
-      updatedAt: Date.now(),
-      importDate: initialData?.importDate || Date.now()
+      updatedAt: Date.now(), // Add updatedAt for sorting
+      importDate: initialData?.importDate || Date.now() // Preserve or set importDate
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -262,12 +260,13 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
           targetFormat = exportType;
       }
 
-      // 导出 PNG 时检查是否有头像图片
-      if (targetFormat === 'png') {
-          const hasNoImage = !char.avatarUrl || char.avatarUrl.includes('picsum.photos');
-          if (hasNoImage) {
-              alert("尚未上传头像。请先在头像区域上传一张本地图片，再导出 PNG。");
-              return;
+      // Check if trying to export PNG from a JSON-imported character (or one without a proper avatar)
+      if (targetFormat === 'png' && char.importFormat === 'json') {
+          // Check if user has uploaded a new avatar (blob url) or still using placeholder
+          if (formData.avatarUrl?.includes('picsum.photos')) {
+               if (!window.confirm("该角色是通过 JSON 导入的，且似乎没有上传自定义头像（当前是随机占位图）。\n导出 PNG 会将数据嵌入到这张占位图中。\n\n确定要继续吗？建议先在编辑页面上传一张图片。")) {
+                   return;
+               }
           }
       }
 
@@ -430,6 +429,34 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
                                     </a>
                                 )}
                             </div>
+                       </div>
+                       <div>
+                            <label className={`block mb-2 ${labelColor}`}>备注 (NOTE)</label>
+                            <div className="flex gap-2">
+                                <input 
+                                    type="text"
+                                    value={(formData as any).note || ''}
+                                    onChange={(e) => setFormData({...formData, note: e.target.value} as any)}
+                                    placeholder="备注或原帖链接 (如 Discord 原帖 URL)..."
+                                    className={`flex-1 rounded-xl px-4 py-3 text-sm outline-none transition-all ${inputBg}`}
+                                />
+                                {(formData as any).note && /^https?:\/\//.test((formData as any).note) && (
+                                    <a 
+                                        href={(formData as any).note} 
+                                        target="_blank" 
+                                        rel="noopener noreferrer"
+                                        className={`p-3 rounded-xl transition-colors flex items-center justify-center ${theme === 'light' ? 'bg-slate-200 hover:bg-slate-300 text-slate-600' : 'bg-white/10 hover:bg-white/20 text-white'}`}
+                                        title="打开备注链接"
+                                    >
+                                        <ExternalLink size={18} />
+                                    </a>
+                                )}
+                            </div>
+                            {(formData as any).note && (
+                                <p className={`mt-1.5 text-xs break-all ${theme === 'light' ? 'text-slate-500' : 'text-white/50'}`}>
+                                    {(formData as any).note}
+                                </p>
+                            )}
                        </div>
                     </div>
                  </div>
