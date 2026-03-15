@@ -125,15 +125,15 @@ function App() {
     setCharacters(prev => prev.map(c => c.id === char.id ? char : c));
   };
 
-  const handleDeleteCharacter = (id: string) => {
-    if (window.confirm("确定要删除这个角色吗？")) {
+  const handleDeleteCharacter = (id: string, skipConfirm = false) => {
+    if (skipConfirm || window.confirm("确定要删除这个角色吗？")) {
       deleteImage(id).catch(err => console.error("Failed to delete image", err));
       setCharacters(prev => prev.filter(c => c.id !== id));
     }
   };
 
-  const handleDeleteBatch = (ids: string[]) => {
-    if (window.confirm(`确定要删除选中的 ${ids.length} 个角色吗？`)) {
+  const handleDeleteBatch = (ids: string[], skipConfirm = false) => {
+    if (skipConfirm || window.confirm(`确定要删除选中的 ${ids.length} 个角色吗？`)) {
       ids.forEach(id => deleteImage(id).catch(err => console.error("Failed to delete image", err)));
       setCharacters(prev => prev.filter(c => !ids.includes(c.id)));
     }
@@ -248,7 +248,7 @@ function App() {
                 initialData={selectedCharacter}
                 onSave={handleSaveCharacter}
                 onCancel={() => setView('list')}
-                onDelete={(id) => { handleDeleteCharacter(id); setView('list'); }}
+                onDelete={handleDeleteCharacter}
                 theme={theme}
               />
             </div>

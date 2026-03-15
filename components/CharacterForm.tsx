@@ -3,13 +3,13 @@ import { Character, Theme } from '../types';
 import GlassCard from './ui/GlassCard';
 import Button from './ui/Button';
 import { parseQrFile, exportCharacterData, exportQrData } from '../services/cardImportService';
-import { X, User, MessageSquare, BookOpen, Upload, ExternalLink, FileJson, Book, Plus, Trash2, Tag, Save, RotateCcw, FileText, QrCode, Layers, Image as ImageIcon, Download, Pen, Eye, Maximize, Check } from 'lucide-react';
+import { X, User, MessageSquare, BookOpen, Upload, ExternalLink, FileJson, Book, Plus, Trash2, Tag, Save, RotateCcw, FileText, QrCode, Layers, Image as ImageIcon, Download, Pen, Eye, Maximize, Check, Info, UserPen, Smile, Map, MessageSquareQuote, Terminal, ScrollText } from 'lucide-react';
 
 interface CharacterFormProps {
   initialData?: Character;
   onSave: (char: Character) => void;
   onCancel: () => void;
-  onDelete?: (id: string) => void;
+  onDelete?: (id: string, skipConfirm?: boolean) => void;
   theme: Theme;
 }
 
@@ -28,12 +28,10 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
     originalFilename: '',
     sourceUrl: '',
     cardUrl: initialData?.cardUrl || initialData?.originalFilename || '',
-    extra_qr_data: {},
-    qrFileName: '',
-    note: initialData?.note || '',
+    extra_qr_data: {}
   });
   
-  // qrFileName is stored in formData (not a separate state) so it persists correctly on save.
+  const [qrFileName, setQrFileName] = useState<string>(initialData?.qrList && initialData.qrList.length > 0 ? 'imported_config.json' : '');
   
   // First Message Modal State
   const [showFirstMesModal, setShowFirstMesModal] = useState(false);
@@ -118,7 +116,7 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
           alert("没有可导出的 QR 数据");
           return;
       }
-      exportQrData(formData.qrList, formData.extra_qr_data, (formData as any).qrFileName);
+      exportQrData(formData.qrList, formData.extra_qr_data, formData.qrFileName);
   };
 
   const handleClearQr = () => {
@@ -199,33 +197,67 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
       });
   };
 
+  // Check if any actual content has changed compared to initialData
+  const hasContentChanged = (): boolean => {
+      if (!initialData) return true; // New character
+
+      const fieldsToCompare: (keyof Character)[] = [
+          'name', 'description', 'personality', 'firstMessage', 'scenario',
+          'mes_example', 'creator_notes', 'system_prompt', 'post_history_instructions',
+          'creator', 'character_version', 'avatarUrl', 'sourceUrl', 'originalFilename'
+      ];
+
+      for (const field of fieldsToCompare) {
+          if ((formData[field] || '') !== (initialData[field] || '')) {
+              return true;
+          }
+      }
+
+      // Deep compare arrays and objects
+      if (JSON.stringify(formData.alternate_greetings || []) !== JSON.stringify(initialData.alternate_greetings || [])) return true;
+      if (JSON.stringify(formData.tags || []) !== JSON.stringify(initialData.tags || [])) return true;
+      if (JSON.stringify(formData.qrList || []) !== JSON.stringify(initialData.qrList || [])) return true;
+      if (JSON.stringify(formData.character_book || {}) !== JSON.stringify(initialData.character_book || {})) return true;
+      if (JSON.stringify(formData.extensions || {}) !== JSON.stringify(initialData.extensions || {})) return true;
+
+      return false;
+  };
+
   // Construct the full character object for saving/exporting
-  const getFullCharacter = (): Character => ({
-      ...initialData,
-      id: initialData?.id || crypto.randomUUID(),
-      name: formData.name || "Unknown",
-      description: formData.description || '',
-      personality: formData.personality || '',
-      firstMessage: formData.firstMessage || '',
-      alternate_greetings: formData.alternate_greetings || [],
-      avatarUrl: formData.avatarUrl!,
-      scenario: formData.scenario || '',
-      character_book: formData.character_book,
-      tags: formData.tags || [],
-      qrList: formData.qrList || [],
-      // extra_qr_data and qrFileName must be taken from formData (not initialData),
-      // because they can be updated in-form via handleQrFileImport / handleClearQr.
-      extra_qr_data: formData.extra_qr_data ?? initialData?.extra_qr_data,
-      qrFileName: (formData as any).qrFileName ?? initialData?.qrFileName,
-      originalFilename: formData.originalFilename,
-      sourceUrl: formData.sourceUrl || '',
-      cardUrl: formData.cardUrl || '',
-      creator_notes: formData.creator_notes || '',
-      note: (formData as any).note || '',
-      fileLastModified: (formData as any).fileLastModified,
-      updatedAt: Date.now(), // Add updatedAt for sorting
-      importDate: initialData?.importDate || Date.now() // Preserve or set importDate
-  });
+  const getFullCharacter = (): Character => {
+      const changed = hasContentChanged();
+      const now = Date.now();
+      
+      return {
+          ...initialData,
+          id: initialData?.id || crypto.randomUUID(),
+          name: formData.name || "Unknown",
+          description: formData.description || '',
+          personality: formData.personality || '',
+          firstMessage: formData.firstMessage || '',
+          alternate_greetings: formData.alternate_greetings || [],
+          avatarUrl: formData.avatarUrl!,
+          scenario: formData.scenario || '',
+          mes_example: formData.mes_example || '',
+          creator_notes: formData.creator_notes || '',
+          system_prompt: formData.system_prompt || '',
+          post_history_instructions: formData.post_history_instructions || '',
+          creator: formData.creator || '',
+          character_version: formData.character_version || '',
+          extensions: formData.extensions || {},
+          character_book: formData.character_book,
+          tags: formData.tags || [],
+          qrList: formData.qrList || [],
+          extra_qr_data: formData.extra_qr_data,
+          qrFileName: formData.qrFileName,
+          originalFilename: formData.originalFilename,
+          sourceUrl: formData.sourceUrl || '',
+          cardUrl: formData.cardUrl || '',
+          updatedAt: changed ? now : (initialData?.updatedAt || now),
+          importDate: initialData?.importDate || now,
+          fileLastModified: changed ? now : (initialData?.fileLastModified || now)
+      };
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -297,17 +329,16 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
        </div>
 
        {/* Header Actions (Fixed relative to content) */}
-       <div className="flex justify-end gap-2 mb-4 shrink-0 relative z-50">
+       <div className="flex justify-end mb-4 shrink-0 relative z-50 gap-2">
            {initialData && onDelete && (
-               <button
-                   type="button"
+               <button 
                    onClick={() => {
-                       if (window.confirm(`确定删除「${initialData.name}」吗？`)) {
-                           onDelete(initialData.id);
-                           onCancel();
+                       if (window.confirm(`确定删除 ${formData.name || '此角色'} 吗?`)) {
+                           onDelete(initialData.id, true);
+                           onCancel(); // Return to list after delete
                        }
                    }}
-                   className={`p-3 rounded-full backdrop-blur-md border transition-all duration-300 shadow-lg ${theme === 'light' ? 'bg-white/80 border-slate-300 hover:bg-red-50 hover:border-red-300 text-slate-400 hover:text-red-500' : 'bg-black/20 border-white/10 hover:bg-red-500/20 hover:border-red-500/30 text-gray-500 hover:text-red-400'}`}
+                   className={`p-3 rounded-full backdrop-blur-md border transition-all duration-300 shadow-lg ${theme === 'light' ? 'bg-white/80 border-slate-300 hover:bg-red-50 text-red-500' : 'bg-black/20 border-white/10 hover:bg-red-500/20 text-red-400'}`}
                    title="删除角色"
                >
                    <Trash2 size={20} />
@@ -375,9 +406,9 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
                             </div>
                         </div>
                         <div>
-                            <label className={`block mb-2 ${labelColor}`}>文件修改时间 (FILE MODIFIED)</label>
+                            <label className={`block mb-2 ${labelColor}`}>本地修改时间 (MODIFIED)</label>
                             <div className={`w-full rounded-xl px-4 py-3 text-sm font-mono opacity-80 truncate ${inputBg}`}>
-                                {(formData as any).fileLastModified ? new Date((formData as any).fileLastModified).toLocaleString() : '未知'}
+                                {formData.fileLastModified ? new Date(formData.fileLastModified).toLocaleString() : new Date().toLocaleString()}
                             </div>
                         </div>
                     </div>
@@ -430,54 +461,104 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
                                 )}
                             </div>
                        </div>
-                       <div>
-                            <label className={`block mb-2 ${labelColor}`}>备注 (NOTE)</label>
-                            <div className="flex gap-2">
-                                <input 
-                                    type="text"
-                                    value={(formData as any).note || ''}
-                                    onChange={(e) => setFormData({...formData, note: e.target.value} as any)}
-                                    placeholder="备注或原帖链接 (如 Discord 原帖 URL)..."
-                                    className={`flex-1 rounded-xl px-4 py-3 text-sm outline-none transition-all ${inputBg}`}
-                                />
-                                {(formData as any).note && /^https?:\/\//.test((formData as any).note) && (
-                                    <a 
-                                        href={(formData as any).note} 
-                                        target="_blank" 
-                                        rel="noopener noreferrer"
-                                        className={`p-3 rounded-xl transition-colors flex items-center justify-center ${theme === 'light' ? 'bg-slate-200 hover:bg-slate-300 text-slate-600' : 'bg-white/10 hover:bg-white/20 text-white'}`}
-                                        title="打开备注链接"
-                                    >
-                                        <ExternalLink size={18} />
-                                    </a>
-                                )}
-                            </div>
-                            {(formData as any).note && (
-                                <p className={`mt-1.5 text-xs break-all ${theme === 'light' ? 'text-slate-500' : 'text-white/50'}`}>
-                                    {(formData as any).note}
-                                </p>
-                            )}
-                       </div>
                     </div>
                  </div>
              </div>
           </GlassCard>
 
+          {/* 1.5 Character Status Info (Read-only / Display) */}
+          {(formData.creator_notes || formData.system_prompt || formData.post_history_instructions || formData.scenario || formData.personality || formData.mes_example) && (
+              <GlassCard theme={theme} className="p-6 mb-6 !bg-opacity-60">
+                  <div className={sectionTitle}><Info size={20}/> 角色详细信息</div>
+                  <div className="space-y-4">
+                      {/* Creator Notes */}
+                      {(formData.creator_notes || formData.extensions?.chub?.version) && (
+                          <div className="space-y-1.5">
+                              <div className={`text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 ${theme === 'light' ? 'text-gray-400' : 'text-gray-400'}`}>
+                                  <UserPen className="w-3 h-3" /> 作者备注
+                                  {formData.extensions?.chub?.version && (
+                                      <span className="text-[10px] font-medium normal-case ml-1">v{formData.extensions.chub.version}</span>
+                                  )}
+                              </div>
+                              {formData.creator_notes ? (
+                                  <div className={`rounded-xl p-4 text-xs leading-relaxed border whitespace-pre-wrap ${theme === 'light' ? 'bg-white text-gray-700 border-gray-100' : 'bg-slate-800 text-gray-300 border-white/10'}`}>
+                                      {formData.creator_notes}
+                                  </div>
+                              ) : (
+                                  <div className={`rounded-xl p-4 text-xs leading-relaxed border italic ${theme === 'light' ? 'bg-white text-gray-400 border-gray-100' : 'bg-slate-800 text-gray-500 border-white/10'}`}>
+                                      暂无作者备注
+                                  </div>
+                              )}
+                          </div>
+                      )}
+
+                      {/* Personality */}
+                      {formData.personality && (
+                          <div className="space-y-1.5">
+                              <div className={`text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 ${theme === 'light' ? 'text-gray-400' : 'text-gray-400'}`}>
+                                  <Smile className="w-3 h-3" /> 性格特征
+                              </div>
+                              <div className={`rounded-xl p-4 text-xs leading-relaxed border whitespace-pre-wrap ${theme === 'light' ? 'bg-white text-gray-700 border-gray-100' : 'bg-slate-800 text-gray-300 border-white/10'}`}>
+                                  {formData.personality}
+                              </div>
+                          </div>
+                      )}
+
+                      {/* Scenario */}
+                      {formData.scenario && (
+                          <div className="space-y-1.5">
+                              <div className={`text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 ${theme === 'light' ? 'text-gray-400' : 'text-gray-400'}`}>
+                                  <Map className="w-3 h-3" /> 场景设定
+                              </div>
+                              <div className={`rounded-xl p-4 text-xs leading-relaxed border whitespace-pre-wrap ${theme === 'light' ? 'bg-white text-gray-700 border-gray-100' : 'bg-slate-800 text-gray-300 border-white/10'}`}>
+                                  {formData.scenario}
+                              </div>
+                          </div>
+                      )}
+
+                      {/* Message Examples */}
+                      {formData.mes_example && (
+                          <div className="space-y-1.5">
+                              <div className={`text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 ${theme === 'light' ? 'text-gray-400' : 'text-gray-400'}`}>
+                                  <MessageSquareQuote className="w-3 h-3" /> 对话示例
+                              </div>
+                              <div className={`rounded-xl p-4 text-xs leading-relaxed border font-mono whitespace-pre-wrap ${theme === 'light' ? 'bg-white text-gray-700 border-gray-100' : 'bg-slate-800 text-gray-300 border-white/10'}`}>
+                                  {formData.mes_example}
+                              </div>
+                          </div>
+                      )}
+
+                      {/* System Prompt */}
+                      {formData.system_prompt && (
+                          <div className="space-y-1.5">
+                              <div className={`text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 ${theme === 'light' ? 'text-gray-400' : 'text-gray-400'}`}>
+                                  <Terminal className="w-3 h-3" /> 系统提示词
+                              </div>
+                              <div className={`rounded-xl p-4 text-xs leading-relaxed border font-mono whitespace-pre-wrap ${theme === 'light' ? 'bg-white text-gray-700 border-gray-100' : 'bg-slate-800 text-gray-300 border-white/10'}`}>
+                                  {formData.system_prompt}
+                              </div>
+                          </div>
+                      )}
+
+                      {/* Post History Instructions */}
+                      {formData.post_history_instructions && (
+                          <div className="space-y-1.5">
+                              <div className={`text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 ${theme === 'light' ? 'text-gray-400' : 'text-gray-400'}`}>
+                                  <ScrollText className="w-3 h-3" /> 历史记录指令
+                              </div>
+                              <div className={`rounded-xl p-4 text-xs leading-relaxed border font-mono whitespace-pre-wrap ${theme === 'light' ? 'bg-white text-gray-700 border-gray-100' : 'bg-slate-800 text-gray-300 border-white/10'}`}>
+                                  {formData.post_history_instructions}
+                              </div>
+                          </div>
+                      )}
+                  </div>
+              </GlassCard>
+          )}
+
           {/* 2. Details Card */}
           <GlassCard theme={theme} className="p-6 mb-6 !bg-opacity-60">
               <div className={sectionTitle}><BookOpen size={20}/> 详细设定</div>
               <div className="space-y-6">
-                {/* Creator Notes - only show if exists */}
-                {formData.creator_notes && (
-                    <div>
-                        <label className={`block mb-2 ${labelColor} flex items-center gap-1.5`}>
-                            <User size={12}/> 作者备注 (CREATOR NOTES)
-                        </label>
-                        <div className={`w-full rounded-xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap opacity-80 ${inputBg}`}>
-                            {formData.creator_notes}
-                        </div>
-                    </div>
-                )}
                 <div>
                     <label className={`block mb-2 ${labelColor}`}>简短描述 (DESCRIPTION)</label>
                     <textarea 
@@ -545,6 +626,18 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
                                     Alternate #{idx + 1}
                                 </span>
                                 <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button 
+                                        type="button" 
+                                        onClick={() => {
+                                            if(confirm('Use this greeting as the main First Message?')) {
+                                                setFormData(prev => ({ ...prev, firstMessage: msg }));
+                                            }
+                                        }}
+                                        className="p-1.5 text-blue-400 hover:text-blue-500 transition-colors rounded-md hover:bg-blue-500/10"
+                                        title="Use as First Message"
+                                    >
+                                        <RotateCcw size={14}/>
+                                    </button>
                                     <button 
                                         type="button" 
                                         onClick={() => removeAltGreeting(idx)}

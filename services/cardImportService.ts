@@ -2,80 +2,6 @@ import { Character } from "../types";
 import JSZip from "jszip";
 import { saveImage } from "./imageService";
 
-/**
- * 将内部 Character 对象还原为标准 ST 角色卡 JSON 格式。
- * 优先使用 _rawCardData 还原原始结构，只覆盖用户编辑过的字段。
- * 这样可以保留 extensions、creator、character_version 等所有原始字段。
- */
-const buildJsonExport = (character: Character): any => {
-  const raw = character._rawCardData;
-
-  if (raw) {
-    const isV2orV3 = raw.spec === 'chara_card_v2' || raw.spec === 'chara_card_v3';
-    if (isV2orV3 && raw.data) {
-      // V2/V3：更新用户可编辑字段，其余原样保留，移除qrList（QR是独立文件）
-      const { qrList: _rq, ...restData } = raw.data;
-      return {
-        ...raw,
-        data: {
-          ...restData,
-          name: character.name,
-          description: character.description,
-          personality: character.personality,
-          first_mes: character.firstMessage,
-          alternate_greetings: character.alternate_greetings,
-          scenario: character.scenario,
-          character_book: character.character_book,
-          tags: character.tags,
-          creator_notes: character.creator_notes ?? raw.data.creator_notes ?? "",
-          // 保留 note 字段（备注/原帖链接）
-          ...(character.note !== undefined ? { note: character.note } : {}),
-        }
-      };
-    } else {
-      // 旧版平铺格式
-      const { qrList: _rq, ...restRaw } = raw;
-      return {
-        ...restRaw,
-        name: character.name,
-        description: character.description,
-        personality: character.personality,
-        first_mes: character.firstMessage,
-        alternate_greetings: character.alternate_greetings,
-        scenario: character.scenario,
-        character_book: character.character_book,
-        tags: character.tags,
-        creator_notes: character.creator_notes ?? raw.creator_notes ?? "",
-        ...(character.note !== undefined ? { note: character.note } : {}),
-      };
-    }
-  }
-
-  // 无原始数据（新建卡）：输出标准 V2
-  return {
-    spec: "chara_card_v2",
-    spec_version: "2.0",
-    data: {
-      name: character.name,
-      description: character.description,
-      personality: character.personality,
-      first_mes: character.firstMessage,
-      alternate_greetings: character.alternate_greetings || [],
-      scenario: character.scenario || "",
-      character_book: character.character_book,
-      tags: character.tags || [],
-      mes_example: "",
-      creator_notes: character.creator_notes || "",
-      system_prompt: "",
-      post_history_instructions: "",
-      creator: "",
-      character_version: "",
-      extensions: {},
-      ...(character.note !== undefined ? { note: character.note } : {}),
-    }
-  };
-};
-
 // Helper to read text from buffer using TextDecoder for UTF-8 support
 const readText = (buffer: Uint8Array, start: number, length: number): string => {
   const slice = buffer.slice(start, start + length);
@@ -416,6 +342,12 @@ export const parseCharacterCard = async (file: File): Promise<Character> => {
     firstMessage: finalData.first_mes || finalData.firstMessage || finalData.intro || finalData.greeting || "Hello.",
     alternate_greetings: finalData.alternate_greetings || finalData.alternate_greeting || [], 
     scenario: finalData.scenario || "",
+    mes_example: finalData.mes_example || "",
+    system_prompt: finalData.system_prompt || "",
+    post_history_instructions: finalData.post_history_instructions || "",
+    creator: finalData.creator || "",
+    character_version: finalData.character_version || "",
+    extensions: finalData.extensions || {},
     character_book: finalData.character_book,
     tags: parsedTags, 
     avatarUrl: avatarUrl,
@@ -424,11 +356,10 @@ export const parseCharacterCard = async (file: File): Promise<Character> => {
     sourceUrl: finalData.sourceUrl || "",
     creator_notes: finalData.creator_notes || finalData.creatorcomment || "",
     importDate: Date.now(),
-    fileLastModified: file.lastModified || undefined,
-    extra_qr_data: finalData.extra_qr_data,
-    _rawCardData: characterData, // 保存完整原始数据（含spec/spec_version/data及所有字段）
-    importFormat: 'png',
-    note: finalData.note || "",  // 保存备注/原帖链接字段
+    fileLastModified: file.lastModified,
+    extra_qr_data: finalData.extra_qr_data, // Preserve if exists
+    qrFileName: finalData.qrFileName,
+    importFormat: 'png'
   };
 };
 
@@ -476,6 +407,12 @@ export const parseCharacterJson = async (file: File): Promise<Character> => {
         firstMessage: finalData.first_mes || finalData.firstMessage || finalData.intro || finalData.greeting || "Hello.",
         alternate_greetings: finalData.alternate_greetings || finalData.alternate_greeting || [],
         scenario: finalData.scenario || "",
+        mes_example: finalData.mes_example || "",
+        system_prompt: finalData.system_prompt || "",
+        post_history_instructions: finalData.post_history_instructions || "",
+        creator: finalData.creator || "",
+        character_version: finalData.character_version || "",
+        extensions: finalData.extensions || {},
         character_book: finalData.character_book,
         tags: parsedTags,
         avatarUrl: avatarUrl,
@@ -484,11 +421,10 @@ export const parseCharacterJson = async (file: File): Promise<Character> => {
         sourceUrl: finalData.sourceUrl || "",
         creator_notes: finalData.creator_notes || finalData.creatorcomment || "",
         importDate: Date.now(),
-        fileLastModified: file.lastModified || undefined,
+        fileLastModified: file.lastModified,
         extra_qr_data: finalData.extra_qr_data,
-        _rawCardData: data, // 保存完整原始数据（含spec/spec_version/顶层遗留字段等）
-        importFormat: 'json',
-        note: finalData.note || "",  // 保存备注/原帖链接字段
+        qrFileName: finalData.qrFileName,
+        importFormat: 'json'
     };
 };
 
@@ -496,16 +432,6 @@ export const parseQrFile = async (file: File): Promise<{ list: any[], raw: any }
   const text = await file.text();
   try {
     const data = JSON.parse(text);
-
-    // 识别：如果是角色卡 JSON（有 spec 字段），拒绝作为 QR 导入
-    if (data && (data.spec === 'chara_card_v2' || data.spec === 'chara_card_v3')) {
-      throw new Error("这是角色卡 JSON 文件，不是 QR 配置文件。请通过「导入文件」按钮导入角色卡。");
-    }
-    // 识别：有 name/description/first_mes 等角色卡特征字段，也拒绝
-    if (data && (data.first_mes !== undefined || data.char_name !== undefined)) {
-      throw new Error("检测到角色卡数据，不是 QR 配置文件。请通过「导入文件」按钮导入角色卡。");
-    }
-
     if (data && Array.isArray(data.qrList)) {
       return { list: data.qrList, raw: data };
     }
@@ -514,17 +440,15 @@ export const parseQrFile = async (file: File): Promise<{ list: any[], raw: any }
     }
     throw new Error("无效的 QR 配置文件: 未找到 qrList 数组");
   } catch (e: any) {
-    throw new Error(e.message.startsWith("无效") || e.message.startsWith("这是") || e.message.startsWith("检测") 
-      ? e.message 
-      : "解析 QR 配置文件失败: " + e.message);
+    throw new Error("解析 QR 配置文件失败: " + e.message);
   }
 };
 
 export const exportQrData = (qrList: any[], extraData: any = {}, originalFilename?: string) => {
-    // 完全用原始数据还原，只用传入qrList作为fallback
-    const finalQrList = (extraData.qrList && extraData.qrList.length > 0) ? extraData.qrList : qrList;
-    const { qrList: _removed, ...restExtra } = extraData;
-    const exportData = {
+    // If extraData is empty or an array (meaning it was just the raw list), we provide some basic defaults
+    const isExtraDataEmpty = !extraData || Array.isArray(extraData) || Object.keys(extraData).length === 0;
+    
+    const exportData = isExtraDataEmpty ? {
         version: 2,
         name: "QR Export",
         disableSend: false,
@@ -532,73 +456,79 @@ export const exportQrData = (qrList: any[], extraData: any = {}, originalFilenam
         injectInput: false,
         color: "rgba(0, 0, 0, 0)",
         onlyBorderColor: false,
-        ...restExtra,   // 原始数据覆盖默认值（含原始name、injectInput等所有字段）
-        qrList: finalQrList
+        qrList: qrList
+    } : {
+        ...extraData,
+        qrList: qrList
     };
-    // 文件名：用原始导入文件名，没有则用原始name字段，再没有才用时间戳
-    const filename = originalFilename || 
-        (restExtra.name ? `${restExtra.name}.json` : `qr_export_${Date.now()}.json`);
+    
     const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    
+    let filename = `qr_export_${Date.now()}.json`;
+    if (originalFilename) {
+        filename = originalFilename.endsWith('.json') ? originalFilename : `${originalFilename}.json`;
+    }
+    
     downloadBlob(blob, filename);
 };
 
-/**
- * 将图片 ArrayBuffer 转为纯 PNG 字节（若已是 PNG 则原样返回，
- * 若是 JPEG/WebP 等则通过 canvas 转换为 PNG）。
- */
-const ensurePngBuffer = async (blob: Blob): Promise<Uint8Array> => {
-  const ab = await blob.arrayBuffer();
-  const header = new Uint8Array(ab, 0, 8);
-  const PNG_SIG = [137, 80, 78, 71, 13, 10, 26, 10];
-  const isAlreadyPng = PNG_SIG.every((b, i) => header[i] === b);
-  if (isAlreadyPng) return new Uint8Array(ab);
-
-  // 非 PNG（如 JPEG）：通过 canvas 转为 PNG
-  const url = URL.createObjectURL(blob);
-  try {
-    const img = new Image();
-    await new Promise<void>((resolve, reject) => {
-      img.onload = () => resolve();
-      img.onerror = () => reject(new Error("无法解码图片"));
-      img.src = url;
-    });
-    const canvas = document.createElement('canvas');
-    canvas.width = img.width;
-    canvas.height = img.height;
-    const ctx = canvas.getContext('2d')!;
-    ctx.drawImage(img, 0, 0);
-    const pngBlob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/png'));
-    if (!pngBlob) throw new Error("Canvas toBlob failed");
-    return new Uint8Array(await pngBlob.arrayBuffer());
-  } finally {
-    URL.revokeObjectURL(url);
-  }
+export const getTavernExportData = (character: Character) => {
+  return {
+    spec: "chara_card_v2",
+    spec_version: "2.0",
+    data: {
+      name: character.name,
+      description: character.description,
+      personality: character.personality,
+      scenario: character.scenario,
+      first_mes: character.firstMessage,
+      mes_example: character.mes_example || "",
+      creator_notes: character.creator_notes || "",
+      system_prompt: character.system_prompt || "",
+      post_history_instructions: character.post_history_instructions || "",
+      tags: character.tags || [],
+      creator: character.creator || "",
+      character_version: character.character_version || "",
+      alternate_greetings: character.alternate_greetings || [],
+      character_book: character.character_book,
+      extensions: character.extensions || {},
+      
+      // Custom fields for this app
+      qrList: character.qrList,
+      extra_qr_data: character.extra_qr_data, // Preserve original QR data
+      qrFileName: character.qrFileName, // Preserve QR filename
+      sourceUrl: character.sourceUrl
+    }
+  };
 };
 
 export const createTavernPng = async (character: Character): Promise<Blob> => {
-  // 1. 优先从 IndexedDB 取原始文件 blob，保持图片字节完全不变（与 HTML 版行为一致）。
-  //    若 IDB 里没有（如新建卡或外部 URL），则回退到从 avatarUrl 加载。
-  let uint8Array: Uint8Array;
+  // 1. Load image onto canvas
+  const img = new Image();
+  img.crossOrigin = "anonymous";
+  img.src = character.avatarUrl;
 
-  const originalBlob = await loadImage(character.id).catch(() => undefined);
+  await new Promise((resolve, reject) => {
+    img.onload = resolve;
+    img.onerror = () => reject(new Error("无法加载图片，可能是跨域问题。请先上传一张本地图片作为头像。"));
+  });
 
-  if (originalBlob) {
-    // 原始文件存在：直接用原始字节（PNG 原样，JPEG 则转为 PNG）
-    uint8Array = await ensurePngBuffer(originalBlob);
-  } else {
-    // 回退：从 avatarUrl 加载（blob URL 或外部 URL）
-    let sourceBlob: Blob;
-    try {
-      const resp = await fetch(character.avatarUrl);
-      sourceBlob = await resp.blob();
-    } catch {
-      throw new Error("无法加载图片，请先上传一张本地图片作为头像。");
-    }
-    uint8Array = await ensurePngBuffer(sourceBlob);
-  }
+  const canvas = document.createElement('canvas');
+  canvas.width = img.width;
+  canvas.height = img.height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error("Canvas context failed");
+  ctx.drawImage(img, 0, 0);
 
-  // 3. Prepare Metadata — 直接复用 buildJsonExport 保证逻辑一致
-  const exportData = buildJsonExport(character);
+  // 2. Convert to Blob
+  const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
+  if (!blob) throw new Error("Failed to create PNG blob");
+
+  const arrayBuffer = await blob.arrayBuffer();
+  const uint8Array = new Uint8Array(arrayBuffer);
+
+  // 3. Prepare Metadata
+  const exportData = getTavernExportData(character);
 
   const jsonStr = JSON.stringify(exportData);
   const base64Data = encodeBase64Utf8(jsonStr);
@@ -622,42 +552,24 @@ export const createTavernPng = async (character: Character): Promise<Blob> => {
   const crc = crc32(crcInput);
   view.setUint32(4 + 4 + chunkLength, crc);
 
-  // 5. Rebuild PNG chunk-by-chunk, stripping existing chara tEXt/iTXt/zTXt chunks
-  //    to avoid duplicate chara chunks (ST reads the first it finds — old stale data wins).
-  const dv = new DataView(uint8Array.buffer, uint8Array.byteOffset, uint8Array.byteLength);
-  const keepChunks: Uint8Array[] = [];
-  keepChunks.push(uint8Array.slice(0, 8)); // PNG signature
-
-  let off = 8;
-  while (off + 12 <= uint8Array.length) {
-    const chunkLen = dv.getUint32(off);
-    const chunkType = String.fromCharCode(
-      uint8Array[off + 4], uint8Array[off + 5],
-      uint8Array[off + 6], uint8Array[off + 7]
-    );
-    const totalChunkSize = 12 + chunkLen;
-    if (chunkType === "IEND") break;
-
-    // Drop any existing chara metadata chunks
-    const isCharaChunk = (chunkType === "tEXt" || chunkType === "iTXt" || chunkType === "zTXt") &&
-      (() => {
-        const dataStart = off + 8;
-        let ni = dataStart;
-        while (ni < dataStart + chunkLen && uint8Array[ni] !== 0) ni++;
-        const kw = new TextDecoder().decode(uint8Array.slice(dataStart, ni));
-        return ["chara", "character", "ccv3"].includes(kw.toLowerCase());
-      })();
-
-    if (!isCharaChunk) keepChunks.push(uint8Array.slice(off, off + totalChunkSize));
-    off += totalChunkSize;
+  // 5. Insert Chunk
+  let iendOffset = -1;
+  const len = uint8Array.length;
+  for (let i = 0; i < len - 7; i++) {
+    if (uint8Array[i] === 0x49 && uint8Array[i+1] === 0x45 && uint8Array[i+2] === 0x4e && uint8Array[i+3] === 0x44) {
+       iendOffset = i - 4;
+       break;
+    }
   }
 
-  // Append new tEXt chara chunk + IEND
-  const IEND = new Uint8Array([0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130]);
-  keepChunks.push(chunkBuffer);
-  keepChunks.push(IEND);
+  if (iendOffset === -1) throw new Error("Invalid PNG: No IEND found");
 
-  return new Blob(keepChunks, { type: 'image/png' });
+  const finalBuffer = new Uint8Array(uint8Array.length + chunkBuffer.length);
+  finalBuffer.set(uint8Array.slice(0, iendOffset), 0);
+  finalBuffer.set(chunkBuffer, iendOffset);
+  finalBuffer.set(uint8Array.slice(iendOffset), iendOffset + chunkBuffer.length);
+
+  return new Blob([finalBuffer], { type: 'image/png' });
 };
 
 export const exportCharacterData = async (character: Character, format: 'json' | 'png', forceZip: boolean = false) => {
@@ -676,8 +588,9 @@ export const exportCharacterData = async (character: Character, format: 'json' |
               alert(`导出 PNG 失败: ${e.message}`);
           }
       } else {
-          const jsonExport = buildJsonExport(character);
-          const blob = new Blob([JSON.stringify(jsonExport, null, 2)], { type: 'application/json' });
+          const exportData = getTavernExportData(character);
+          const data = JSON.stringify(exportData, null, 2);
+          const blob = new Blob([data], { type: 'application/json' });
           downloadBlob(blob, `${filenameBase}.json`);
       }
       return;
@@ -692,32 +605,28 @@ export const exportCharacterData = async (character: Character, format: 'json' |
           zip.file(`${filenameBase}.png`, blob);
       } catch (e: any) {
           console.error("Failed to create PNG for zip", e);
-          const jsonExport = buildJsonExport(character);
-          zip.file(`${filenameBase}.json`, JSON.stringify(jsonExport, null, 2));
+          const exportData = getTavernExportData(character);
+          zip.file(`${filenameBase}.json`, JSON.stringify(exportData, null, 2));
       }
   } else {
-      const jsonExport = buildJsonExport(character);
-      zip.file(`${filenameBase}.json`, JSON.stringify(jsonExport, null, 2));
+      const exportData = getTavernExportData(character);
+      zip.file(`${filenameBase}.json`, JSON.stringify(exportData, null, 2));
   }
 
   if (character.qrList && character.qrList.length > 0) {
-      const extra = character.extra_qr_data || {};
-      const { qrList: _removed, ...restExtra } = extra;
-      const finalQrList = (extra.qrList && extra.qrList.length > 0) ? extra.qrList : character.qrList;
-      const qrExportData = {
+      const isExtraDataEmpty = !character.extra_qr_data || Array.isArray(character.extra_qr_data) || Object.keys(character.extra_qr_data).length === 0;
+      const qrExportData = isExtraDataEmpty ? {
         version: 2,
-        name: "QR Export",
-        disableSend: false,
-        placeBeforeInput: false,
-        injectInput: false,
-        color: "rgba(0, 0, 0, 0)",
-        onlyBorderColor: false,
-        ...restExtra,   // 原始字段覆盖（含原始name、injectInput等）
-        qrList: finalQrList
+        name: `${character.name} QR`,
+        qrList: character.qrList
+      } : {
+        ...character.extra_qr_data,
+        qrList: character.qrList
       };
-      // 用原始导入文件名，没有则用原始name字段
-      const qrFilename = character.qrFileName || 
-          (restExtra.name ? `${restExtra.name}.json` : `${filenameBase}_qr.json`);
+      let qrFilename = character.qrFileName || `${filenameBase}_qr.json`;
+      if (!qrFilename.endsWith('.json')) {
+          qrFilename += '.json';
+      }
       zip.file(qrFilename, JSON.stringify(qrExportData, null, 2));
   }
 
@@ -751,7 +660,8 @@ export const exportBulkCharacters = async (characters: Character[], collections:
         let finalFilename = filename;
 
         if (char.importFormat === 'json') {
-            fileData = JSON.stringify(buildJsonExport(char), null, 2);
+            const exportData = getTavernExportData(char);
+            fileData = JSON.stringify(exportData, null, 2);
             if (!isJson) finalFilename = filename.replace(/\.[^/.]+$/, "") + ".json";
         } else {
             // Default to PNG
@@ -760,7 +670,8 @@ export const exportBulkCharacters = async (characters: Character[], collections:
                 if (!isPng) finalFilename = filename.replace(/\.[^/.]+$/, "") + ".png";
             } catch (e) {
                 console.error(`Failed to create PNG for ${char.name}, falling back to JSON`, e);
-                fileData = JSON.stringify(buildJsonExport(char), null, 2);
+                const exportData = getTavernExportData(char);
+                fileData = JSON.stringify(exportData, null, 2);
                 finalFilename = filename.replace(/\.[^/.]+$/, "") + ".json";
             }
         }
@@ -786,29 +697,31 @@ export const exportBulkCharacters = async (characters: Character[], collections:
         }
 
         if (hasQr) {
+            // Create subfolder for this character
+            // Use character name for folder name, or filename without extension
             const charFolderName = finalFilename.replace(/\.[^/.]+$/, "");
             const charFolder = targetFolder.folder(charFolderName);
             
             if (charFolder) {
                 charFolder.file(finalFilename, fileData);
                 
-                const extra = char.extra_qr_data || {};
-                const { qrList: _removed, ...restExtra } = extra;
-                const finalQrList = (extra.qrList && extra.qrList.length > 0) ? extra.qrList : char.qrList;
-                const qrExportData = {
+                // Export QR
+                const isExtraDataEmpty = !char.extra_qr_data || Array.isArray(char.extra_qr_data) || Object.keys(char.extra_qr_data).length === 0;
+                const qrExportData = isExtraDataEmpty ? {
                     version: 2,
-                    name: "QR Export",
-                    disableSend: false,
-                    placeBeforeInput: false,
-                    injectInput: false,
-                    color: "rgba(0, 0, 0, 0)",
-                    onlyBorderColor: false,
-                    ...restExtra,   // 原始字段覆盖（含原始name、injectInput等）
-                    qrList: finalQrList
+                    name: `${char.name} QR`,
+                    qrList: char.qrList
+                } : {
+                    ...char.extra_qr_data,
+                    qrList: char.qrList
                 };
-                // 用原始导入文件名，没有则用原始name字段
-                const qrFilename = char.qrFileName ||
-                    (restExtra.name ? `${restExtra.name}.json` : finalFilename.replace(/\.[^/.]+$/, "") + "_qr.json");
+                // QR filename: usually same base name + _qr.json? Or just qr.json?
+                // User didn't specify, but "QR + Card" implies they go together.
+                // Let's use original filename base + _qr.json
+                let qrFilename = char.qrFileName || finalFilename.replace(/\.[^/.]+$/, "") + "_qr.json";
+                if (!qrFilename.endsWith('.json')) {
+                    qrFilename += '.json';
+                }
                 charFolder.file(qrFilename, JSON.stringify(qrExportData, null, 2));
             }
         } else {

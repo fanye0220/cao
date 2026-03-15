@@ -54,6 +54,59 @@ export const generateCharacterProfile = async (prompt: string): Promise<Partial<
   }
 };
 
+// Helper to extract active World Info entries
+const getActiveWorldInfo = (character: Character, history: Message[], newMessage: string): string => {
+  if (!character.character_book || !character.character_book.entries || character.character_book.entries.length === 0) {
+    return '';
+  }
+
+  // Combine recent history (last 5 messages) and new message to search for keywords
+  const recentHistory = history.slice(-5).map(m => m.content).join('\n');
+  const searchContext = `${recentHistory}\n${newMessage}`;
+
+  const activeEntries: string[] = [];
+
+  // Sort entries by insertion_order (or priority)
+  const sortedEntries = [...character.character_book.entries].sort((a, b) => {
+    const orderA = a.insertion_order ?? 50;
+    const orderB = b.insertion_order ?? 50;
+    return orderA - orderB;
+  });
+
+  for (const entry of sortedEntries) {
+    if (entry.enabled === false) continue;
+    
+    // Check if any key is in the search context
+    let isMatch = false;
+    for (const key of entry.keys) {
+      if (!key) continue;
+      
+      let searchKey = key;
+      let context = searchContext;
+      
+      if (!entry.case_sensitive) {
+        searchKey = searchKey.toLowerCase();
+        context = context.toLowerCase();
+      }
+      
+      if (context.includes(searchKey)) {
+        isMatch = true;
+        break;
+      }
+    }
+    
+    if (isMatch && entry.content) {
+      activeEntries.push(`${entry.name ? `[${entry.name}]: ` : ''}${entry.content}`);
+    }
+  }
+
+  if (activeEntries.length > 0) {
+    return `\n\nWorld Info (Lorebook):\n${activeEntries.join('\n\n')}`;
+  }
+  
+  return '';
+};
+
 /**
  * Streaming chat with a character.
  */
@@ -64,13 +117,15 @@ export const streamChatResponse = async function* (
 ) {
   const ai = getClient();
 
+  const activeWorldInfo = getActiveWorldInfo(character, history, newMessage);
+
   // Construct system instruction
   const systemInstruction = `
     You are roleplaying as ${character.name}.
     
     Description: ${character.description}
     Personality: ${character.personality}
-    Scenario: ${character.scenario || 'A casual encounter.'}
+    Scenario: ${character.scenario || 'A casual encounter.'}${activeWorldInfo}
     
     Instructions:
     - Stay in character at all times.

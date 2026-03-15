@@ -2,7 +2,7 @@ import React, { useRef, useState, useMemo, useEffect } from 'react';
 import { Character, Theme } from '../types';
 import Button from './ui/Button';
 import Modal from './ui/Modal';
-import { Pencil, Trash2, Upload, AlertCircle, Download, FileText, AlertTriangle, CheckSquare, Square, Filter, ChevronLeft, ChevronRight, ChevronDown, FolderInput, Book, MessageSquare, MoreVertical, FileJson, Image as ImageIcon, Check, Heart, Star, List, Tag, Menu, X, Plus, Copy, Folder, FolderPlus, GitCompare, Maximize, Search } from 'lucide-react';
+import { Pencil, Trash2, Upload, AlertCircle, Download, FileText, AlertTriangle, CheckSquare, Square, Filter, ChevronLeft, ChevronRight, ChevronDown, FolderInput, Book, MessageSquare, MoreVertical, FileJson, Image as ImageIcon, Check, Heart, Star, List, Tag, Menu, X, Plus, Copy, Folder, FolderPlus, GitCompare, Maximize, Search, BookOpen, QrCode, Scale, ArrowLeft, ArrowRight, Zap } from 'lucide-react';
 import { parseCharacterCard, parseCharacterJson, exportCharacterData, exportBulkCharacters } from '../services/cardImportService';
 
 // Removed invalid module augmentation. We will cast props if needed or ignore the error for now as it's just for directory upload.
@@ -11,8 +11,8 @@ import { parseCharacterCard, parseCharacterJson, exportCharacterData, exportBulk
 interface CharacterListProps {
   characters: Character[];
   onSelect: (char: Character) => void;
-  onDelete: (id: string) => void;
-  onDeleteBatch?: (ids: string[]) => void;
+  onDelete: (id: string, skipConfirm?: boolean) => void;
+  onDeleteBatch?: (ids: string[], skipConfirm?: boolean) => void;
   onImport: (char: Character) => void;
   onImportBatch?: (chars: Character[]) => void;
   onUpdate?: (char: Character) => void; // Add onUpdate prop
@@ -26,10 +26,8 @@ interface CharacterListProps {
 interface ImportResults {
   success: number;
   failed: number;
-  failedCards: string[];   // 角色卡解析失败（文件名）
-  failedQr: string[];      // 误传QR文件（文件名）
-  failedJpeg: string[];    // JPEG/非PNG图片（文件名）
-  duplicates: string[];    // 重复角色名
+  failedFiles: string[];
+  duplicates: string[];
 }
 
 const CharacterList: React.FC<CharacterListProps> = ({ 
@@ -437,9 +435,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
 
     let successCount = 0;
     let failCount = 0;
-    const failedCards: string[] = [];
-    const failedQr: string[] = [];
-    const failedJpeg: string[] = [];
+    const failedFiles: string[] = [];
     const duplicates: string[] = [];
     const fileArray = Array.from(files) as File[];
     const validChars: Character[] = [];
@@ -453,48 +449,13 @@ const CharacterList: React.FC<CharacterListProps> = ({
           await new Promise(resolve => setTimeout(resolve, 0));
       }
 
-      const nameLower = file.name.toLowerCase();
-      const isPng = nameLower.endsWith('.png');
-      const isJson = nameLower.endsWith('.json');
+      const isPng = file.name.toLowerCase().endsWith('.png');
+      const isJson = file.name.toLowerCase().endsWith('.json');
       
       if (!isPng && !isJson) {
           continue; 
       }
-
       try {
-        // PNG：先读 magic bytes 判断是否真的是 PNG（排除 JPEG 等被改名的文件）
-        if (isPng) {
-            const header = await file.slice(0, 8).arrayBuffer();
-            const bytes = new Uint8Array(header);
-            const PNG_SIG = [137, 80, 78, 71, 13, 10, 26, 10];
-            const isRealPng = PNG_SIG.every((b, i) => bytes[i] === b);
-            if (!isRealPng) {
-                failCount++;
-                failedJpeg.push(file.name);
-                continue;
-            }
-        }
-
-        // JSON：先读内容，区分是角色卡还是 QR 配置
-        if (isJson) {
-            const text = await file.text();
-            let jsonData: any;
-            try { jsonData = JSON.parse(text); } catch {
-                failCount++;
-                failedCards.push(file.name);
-                continue;
-            }
-            // 判断是否是 QR 文件（有 qrList 数组但没有角色卡特征）
-            const isQrFile = Array.isArray(jsonData?.qrList) && 
-                             !jsonData?.spec?.startsWith('chara_card') &&
-                             jsonData?.first_mes === undefined;
-            if (isQrFile) {
-                failCount++;
-                failedQr.push(file.name);
-                continue;
-            }
-        }
-
         let char: Character;
         if (isPng) {
             char = await parseCharacterCard(file);
@@ -515,7 +476,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
       } catch (err: any) {
         console.error(`Failed to import ${file.name}:`, err);
         failCount++;
-        failedCards.push(file.name);
+        failedFiles.push(`${file.name}: ${err.message}`);
       }
     }
 
@@ -529,7 +490,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
 
     setImportingCount(0);
     if (failCount > 0 || (duplicates.length > 0 && files.length > 1)) {
-        setImportResults({ success: successCount, failed: failCount, failedCards, failedQr, failedJpeg, duplicates });
+        setImportResults({ success: successCount, failed: failCount, failedFiles, duplicates });
         setImportErrorModalOpen(true);
     } else if (files.length > 1) {
         // Optional: show success toast for bulk import
@@ -1141,7 +1102,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
                  <Button 
                      variant="danger" 
                      disabled={selectedIds.size === 0} 
-                     onClick={() => {if(window.confirm(`确定删除这 ${selectedIds.size} 张卡片吗?`)) { onDeleteBatch?.(Array.from(selectedIds)); setSelectedIds(new Set()); }}} 
+                     onClick={() => {if(window.confirm(`确定删除这 ${selectedIds.size} 张卡片吗?`)) { onDeleteBatch?.(Array.from(selectedIds), true); setSelectedIds(new Set()); }}} 
                      className="!py-1.5 !px-4 !text-xs !h-9 !rounded-lg shadow-sm hover:shadow-md transition-all bg-red-500 hover:bg-red-600 border-none"
                  >
                     <Trash2 size={14} className="mr-1.5" /> 删除
@@ -1270,234 +1231,232 @@ const CharacterList: React.FC<CharacterListProps> = ({
         title="导入结果"
         theme={theme}
       >
-        {importResults && (
-          <div className="space-y-3">
-            {/* 统计行 */}
-            <div className={`flex items-center gap-3 text-xs font-bold pb-3 border-b ${theme === 'light' ? 'border-slate-100' : 'border-white/10'}`}>
-              {importResults.success > 0 && (
-                <span className="flex items-center gap-1 text-green-500">
-                  <Check size={13}/> 成功 {importResults.success}
-                </span>
-              )}
-              {importResults.failed > 0 && (
-                <span className="flex items-center gap-1 text-red-400">
-                  <AlertCircle size={13}/> 失败 {importResults.failed}
-                </span>
-              )}
-              {importResults.duplicates.length > 0 && (
-                <span className="flex items-center gap-1 text-yellow-400">
-                  <AlertTriangle size={13}/> 重复 {importResults.duplicates.length}
-                </span>
-              )}
-            </div>
-
-            {/* 角色卡解析失败 */}
-            {importResults.failedCards.length > 0 && (
-              <div>
-                <div className={`text-[10px] font-black uppercase tracking-widest mb-1.5 flex items-center gap-1.5 ${theme === 'light' ? 'text-red-400' : 'text-red-400'}`}>
-                  <AlertCircle size={11}/> 角色卡解析失败
-                </div>
-                <div className={`rounded-xl p-2.5 space-y-1 max-h-36 overflow-y-auto custom-scrollbar ${theme === 'light' ? 'bg-red-50' : 'bg-red-500/10'}`}>
-                  {importResults.failedCards.map((name, i) => (
-                    <div key={i} className={`text-xs font-mono truncate px-1 ${theme === 'light' ? 'text-red-700' : 'text-red-300'}`}>{name}</div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* QR配置文件 */}
-            {importResults.failedQr.length > 0 && (
-              <div>
-                <div className={`text-[10px] font-black uppercase tracking-widest mb-1.5 flex items-center gap-1.5 ${theme === 'light' ? 'text-purple-400' : 'text-purple-400'}`}>
-                  <AlertTriangle size={11}/> QR 配置文件（请在角色编辑页绑定）
-                </div>
-                <div className={`rounded-xl p-2.5 space-y-1 max-h-36 overflow-y-auto custom-scrollbar ${theme === 'light' ? 'bg-purple-50' : 'bg-purple-500/10'}`}>
-                  {importResults.failedQr.map((name, i) => (
-                    <div key={i} className={`text-xs font-mono truncate px-1 ${theme === 'light' ? 'text-purple-700' : 'text-purple-300'}`}>{name}</div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* JPEG/非PNG图片 */}
-            {importResults.failedJpeg.length > 0 && (
-              <div>
-                <div className={`text-[10px] font-black uppercase tracking-widest mb-1.5 flex items-center gap-1.5 ${theme === 'light' ? 'text-orange-400' : 'text-orange-400'}`}>
-                  <AlertTriangle size={11}/> 非角色卡图片（JPEG 等）
-                </div>
-                <div className={`rounded-xl p-2.5 space-y-1 max-h-36 overflow-y-auto custom-scrollbar ${theme === 'light' ? 'bg-orange-50' : 'bg-orange-500/10'}`}>
-                  {importResults.failedJpeg.map((name, i) => (
-                    <div key={i} className={`text-xs font-mono truncate px-1 ${theme === 'light' ? 'text-orange-700' : 'text-orange-300'}`}>{name}</div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* 重复角色 */}
-            {importResults.duplicates.length > 0 && (
-              <div>
-                <div className={`text-[10px] font-black uppercase tracking-widest mb-1.5 flex items-center gap-1.5 ${theme === 'light' ? 'text-yellow-500' : 'text-yellow-400'}`}>
-                  <Copy size={11}/> 重复角色（已导入）
-                </div>
-                <div className={`rounded-xl p-2.5 space-y-1 max-h-36 overflow-y-auto custom-scrollbar ${theme === 'light' ? 'bg-yellow-50' : 'bg-yellow-500/10'}`}>
-                  {importResults.duplicates.map((name, i) => (
-                    <div key={i} className={`text-xs font-mono truncate px-1 ${theme === 'light' ? 'text-yellow-700' : 'text-yellow-300'}`}>{name}</div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div className="flex justify-end pt-2">
-              <Button onClick={() => setImportErrorModalOpen(false)} variant="primary">确认</Button>
-            </div>
+        <div className="space-y-4">
+          <div className="flex items-center gap-4 text-sm">
+             <div className="flex items-center gap-1 text-green-500 font-bold">
+                <Check size={16} /> 成功: {importResults?.success}
+             </div>
+             {importResults && importResults.failed > 0 && (
+                 <div className="flex items-center gap-1 text-red-500 font-bold">
+                    <AlertCircle size={16} /> 失败: {importResults?.failed}
+                 </div>
+             )}
+             {importResults && importResults.duplicates.length > 0 && (
+                 <div className="flex items-center gap-1 text-yellow-500 font-bold">
+                    <AlertTriangle size={16} /> 重复: {importResults?.duplicates.length}
+                 </div>
+             )}
           </div>
-        )}
+          
+          {importResults && (importResults as ImportResults).failedFiles.length > 0 && (
+            <div className="mt-4">
+              <h4 className="font-semibold mb-2 text-sm uppercase tracking-wider opacity-70">失败文件详情</h4>
+              <div className={`rounded-lg p-3 text-sm font-mono overflow-x-auto max-h-32 overflow-y-auto custom-scrollbar ${theme === 'light' ? 'bg-red-50 text-red-800' : 'bg-red-900/20 text-red-200'}`}>
+                <ul className="list-disc list-inside space-y-1">
+                  {(importResults as ImportResults).failedFiles.map((msg, idx) => (
+                    <li key={idx} className="break-all">{msg}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+
+          {importResults && (importResults as ImportResults).duplicates.length > 0 && (
+            <div className="mt-4">
+              <h4 className="font-semibold mb-2 text-sm uppercase tracking-wider opacity-70">重复角色 (已导入)</h4>
+              <div className={`rounded-lg p-3 text-sm font-mono overflow-x-auto max-h-32 overflow-y-auto custom-scrollbar ${theme === 'light' ? 'bg-yellow-50 text-yellow-800' : 'bg-yellow-900/20 text-yellow-200'}`}>
+                <p className="mb-2 text-xs opacity-70">以下角色名称已存在，但仍已导入为新卡片：</p>
+                <ul className="list-disc list-inside space-y-1">
+                  {(importResults as ImportResults).duplicates.map((name, idx) => (
+                    <li key={idx} className="break-all">{name}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+          
+          <div className="flex justify-end mt-6">
+            <Button onClick={() => setImportErrorModalOpen(false)} variant="primary">
+              确认
+            </Button>
+          </div>
+        </div>
       </Modal>
 
-      {/* Compare Modal */}
-      {compareModalOpen && selectedIds.size === 2 && (() => {
-          const [idA, idB] = Array.from(selectedIds);
-          const charA = characters.find(c => c.id === idA);
-          const charB = characters.find(c => c.id === idB);
-          if (!charA || !charB) return null;
-
-          const getFirstMesCount = (char: Character) => 1 + (char.alternate_greetings?.length || 0);
-          const getWICount = (char: Character) => char.character_book?.entries?.length || 0;
-          const getWIChars = (char: Character) => (char.character_book?.entries || []).reduce((sum, e) => sum + (e.content?.length || 0), 0);
-
-          const diffClass = (lenA: number, lenB: number, isA: boolean) => {
-              if (lenA === lenB) return theme === 'light' ? 'text-gray-700' : 'text-gray-300';
-              if (isA) return lenA > lenB ? 'text-green-500' : 'text-gray-500';
-              return lenB > lenA ? 'text-green-500' : 'text-gray-500';
-          };
-          const ringClass = (lenA: number, lenB: number) =>
-              lenA !== lenB ? (theme === 'light' ? 'ring-2 ring-rose-200 bg-rose-50/30' : 'ring-2 ring-rose-500/30 bg-rose-900/10') : '';
-
-          const renderCardCol = (char: Character, other: Character, label: string) => (
-              <div className="flex flex-col gap-4">
-                  {/* Header */}
-                  <div className={`p-4 rounded-2xl border flex gap-4 items-start ${theme === 'light' ? 'bg-white border-gray-200' : 'bg-white/5 border-white/10'}`}>
-                      <img src={char.avatarUrl} alt={char.name} className="w-16 h-16 rounded-xl object-cover shrink-0" />
-                      <div className="flex-1 min-w-0">
-                          <div className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${theme === 'light' ? 'text-gray-400' : 'text-gray-500'}`}>{label}</div>
-                          <div className={`text-base font-black truncate ${theme === 'light' ? 'text-gray-800' : 'text-white'}`}>{char.name}</div>
-                          <div className={`text-xs font-mono truncate opacity-60`}>{char.originalFilename || 'unknown'}</div>
-                          {char.qrList && char.qrList.length > 0 && (
-                              <div className={`mt-1.5 inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md font-bold ${theme === 'light' ? 'bg-purple-50 text-purple-600 border border-purple-200' : 'bg-purple-500/20 text-purple-300 border border-purple-500/30'}`}>
-                                  ⚡ 有快速回复 ({char.qrList.length})
-                              </div>
-                          )}
-                          <div className="mt-3 flex gap-2">
-                              {other.qrList && other.qrList.length > 0 && (
-                                  <Button
-                                      variant="secondary"
-                                      onClick={() => {
-                                          if (window.confirm(`确定将「${other.name}」的 ${other.qrList!.length} 个快速回复转移到「${char.name}」吗?`)) {
-                                              onUpdate?.({ ...char, qrList: other.qrList, extra_qr_data: (other as any).extra_qr_data });
-                                          }
-                                      }}
-                                      className="!py-1.5 !px-3 !text-xs !rounded-lg"
-                                      title={`从「${other.name}」转移快速回复`}
-                                  >
-                                      ⚡ ← QR
-                                  </Button>
-                              )}
-                              <Button
-                                  variant="danger"
-                                  onClick={() => {
-                                      if (window.confirm(`确定保留「${char.name}」并删除另一张吗?`)) {
-                                          const otherId = other.id;
-                                          onDelete(otherId);
-                                          setCompareModalOpen(false);
-                                          setSelectedIds(new Set());
-                                      }
-                                  }}
-                                  className="!py-1.5 !px-3 !text-xs !rounded-lg flex-1"
-                              >
-                                  保留此版本
-                              </Button>
-                          </div>
-                      </div>
-                  </div>
-
-                  {/* Description */}
-                  <div className={`p-4 rounded-2xl border ${ringClass((char.description||'').length, (other.description||'').length)} ${theme === 'light' ? 'bg-white border-gray-200' : 'bg-white/5 border-white/10'}`}>
-                      <div className="flex justify-between items-center mb-2">
-                          <span className={`text-[10px] font-bold uppercase tracking-widest ${theme === 'light' ? 'text-gray-400' : 'text-gray-500'}`}>Description 字数</span>
-                          <span className={`text-xl font-black font-mono ${diffClass((char.description||'').length, (other.description||'').length, char === charA)}`}>
-                              {(char.description||'').length}
-                          </span>
-                      </div>
-                      <div className={`h-36 overflow-y-auto custom-scrollbar text-xs leading-relaxed font-mono p-2.5 rounded-xl whitespace-pre-wrap ${theme === 'light' ? 'bg-gray-50 text-gray-600 border border-gray-100' : 'bg-black/20 text-gray-400'}`}>
-                          {char.description || '(无)'}
-                      </div>
-                  </div>
-
-                  {/* First Message */}
-                  <div className={`p-4 rounded-2xl border ${ringClass((char.firstMessage||'').length, (other.firstMessage||'').length)} ${theme === 'light' ? 'bg-white border-gray-200' : 'bg-white/5 border-white/10'}`}>
-                      <div className="flex justify-between items-center mb-2">
-                          <span className={`text-[10px] font-bold uppercase tracking-widest ${theme === 'light' ? 'text-gray-400' : 'text-gray-500'}`}>First Message 字数</span>
-                          <span className={`text-xl font-black font-mono ${diffClass((char.firstMessage||'').length, (other.firstMessage||'').length, char === charA)}`}>
-                              {(char.firstMessage||'').length}
-                          </span>
-                      </div>
-                      <div className={`h-36 overflow-y-auto custom-scrollbar text-xs leading-relaxed font-mono p-2.5 rounded-xl whitespace-pre-wrap ${theme === 'light' ? 'bg-gray-50 text-gray-600 border border-gray-100' : 'bg-black/20 text-gray-400'}`}>
-                          {char.firstMessage || '(无)'}
-                      </div>
-                  </div>
-
-                  {/* Greetings Count */}
-                  <div className={`p-4 rounded-2xl border ${theme === 'light' ? 'bg-white border-gray-200' : 'bg-white/5 border-white/10'}`}>
-                      <div className="flex justify-between items-center mb-2">
-                          <span className={`text-[10px] font-bold uppercase tracking-widest ${theme === 'light' ? 'text-gray-400' : 'text-gray-500'}`}>开场白数量</span>
-                          <span className="text-xl font-black font-mono text-green-500">{getFirstMesCount(char)}</span>
-                      </div>
-                      <div className="space-y-1.5">
-                          <div className={`p-2 rounded-lg text-xs flex justify-between ${ringClass((char.firstMessage||'').length, (other.firstMessage||'').length)} ${theme === 'light' ? 'bg-blue-50' : 'bg-blue-500/10'}`}>
-                              <span className={theme === 'light' ? 'font-bold text-gray-700' : 'font-bold text-gray-300'}>主开场白:</span>
-                              <span className={`font-bold ${diffClass((char.firstMessage||'').length, (other.firstMessage||'').length, char === charA)}`}>{(char.firstMessage||'').length} 字符</span>
-                          </div>
-                          {(char.alternate_greetings||[]).map((alt, idx) => (
-                              <div key={idx} className={`p-2 rounded-lg text-xs flex justify-between ${ringClass((alt||'').length, ((other.alternate_greetings||[])[idx]||'').length)} ${theme === 'light' ? 'bg-gray-50' : 'bg-white/5'}`}>
-                                  <span className="opacity-70">备用 #{idx+1}:</span>
-                                  <span className={`font-bold ${diffClass((alt||'').length, ((other.alternate_greetings||[])[idx]||'').length, char === charA)}`}>{(alt||'').length} 字符</span>
-                              </div>
-                          ))}
-                      </div>
-                  </div>
-
-                  {/* World Info */}
-                  <div className={`p-4 rounded-2xl border ${theme === 'light' ? 'bg-white border-gray-200' : 'bg-white/5 border-white/10'}`}>
-                      <div className="flex justify-between items-center mb-2">
-                          <span className={`text-[10px] font-bold uppercase tracking-widest ${theme === 'light' ? 'text-gray-400' : 'text-gray-500'}`}>世界书 (Lorebook)</span>
-                          <span className="text-xl font-black font-mono text-purple-500">{getWICount(char)} 条</span>
-                      </div>
-                      <div className={`p-3 rounded-xl ${theme === 'light' ? 'bg-purple-50' : 'bg-purple-500/10'}`}>
-                          <div className={`text-xs mb-1 ${theme === 'light' ? 'text-gray-600' : 'text-gray-400'}`}>总字符数:</div>
-                          <div className="text-2xl font-black text-purple-500">{getWIChars(char).toLocaleString()}</div>
-                      </div>
-                  </div>
-              </div>
-          );
-
-          return (
-              <Modal
-                isOpen={compareModalOpen}
-                onClose={() => setCompareModalOpen(false)}
-                title="档案深度对比 (Diff Check)"
-                theme={theme}
-                maxWidth="max-w-5xl"
-              >
-                <div className="grid grid-cols-2 gap-6 max-h-[70vh] overflow-y-auto custom-scrollbar pr-1">
-                    {renderCardCol(charA, charB, 'Card A (Keep Left)')}
-                    {renderCardCol(charB, charA, 'Card B (Keep Right)')}
+      {/* Compare Modal (Diff Check) */}
+      {compareModalOpen && selectedIds.size === 2 && (
+        <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-6">
+            <div className={`w-full max-w-6xl h-[90vh] rounded-[32px] shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in duration-300 ${theme === 'light' ? 'bg-white' : 'bg-slate-900 text-slate-100 border border-white/10'}`}>
+                <div className={`px-8 py-5 border-b flex justify-between items-center ${theme === 'light' ? 'border-gray-100 bg-gray-50' : 'border-white/10 bg-slate-800/50'}`}>
+                    <span className="font-black text-lg flex items-center gap-3"><Scale className="text-rose-500" /> 档案深度对比 (Diff Check)</span>
+                    <button onClick={() => setCompareModalOpen(false)} className={`w-10 h-10 flex items-center justify-center rounded-full transition-colors ${theme === 'light' ? 'hover:bg-gray-200 text-gray-500' : 'hover:bg-white/10 text-gray-400'}`}><X /></button>
                 </div>
-                <div className="flex justify-end mt-4">
-                    <Button onClick={() => setCompareModalOpen(false)} variant="primary">关闭</Button>
+                
+                <div className={`flex-1 overflow-y-auto custom-scrollbar p-6 ${theme === 'light' ? 'bg-slate-50/50' : 'bg-slate-900/50'}`}>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        {(() => {
+                            const compareIds = Array.from(selectedIds);
+                            const char1 = characters.find(c => c.id === compareIds[0]);
+                            const char2 = characters.find(c => c.id === compareIds[1]);
+
+                            if (!char1 || !char2) return null;
+
+                            return [char1, char2].map((char, index) => {
+                                const otherChar = index === 0 ? char2 : char1;
+                                const isLeft = index === 0;
+                                
+                                const descLength = char.description?.length || 0;
+                                const otherDescLength = otherChar.description?.length || 0;
+                                const isDescDiff = descLength !== otherDescLength;
+                                const isDescGreater = descLength > otherDescLength;
+
+                                const fmLength = char.firstMessage?.length || 0;
+                                const otherFmLength = otherChar.firstMessage?.length || 0;
+                                const isFmDiff = fmLength !== otherFmLength;
+                                const isFmGreater = fmLength > otherFmLength;
+
+                                const fmCount = 1 + (char.alternate_greetings?.length || 0);
+                                
+                                const wbCount = char.character_book?.entries?.length || 0;
+                                const wbTotalChars = char.character_book?.entries?.reduce((sum, entry) => sum + (entry.content?.length || 0), 0) || 0;
+
+                                return (
+                                    <div key={char.id} className="flex flex-col gap-6">
+                                        {/* 头部信息 */}
+                                        <div className={`p-5 rounded-3xl border shadow-sm flex gap-5 items-start ${theme === 'light' ? 'bg-white border-gray-200' : 'bg-slate-800 border-white/10'}`}>
+                                             <img src={char.avatarUrl} className={`w-20 h-20 rounded-xl object-cover border ${theme === 'light' ? 'bg-gray-100 border-gray-100' : 'bg-slate-700 border-white/10'}`} />
+                                             <div className="flex-1 min-w-0">
+                                                 <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Card {isLeft ? 'A (Keep Left)' : 'B (Keep Right)'}</div>
+                                                 <div className="text-lg font-black truncate">{char.name}</div>
+                                                 <div className="text-xs font-mono text-gray-400 truncate">{char.fileName || `${char.name}.png`}</div>
+                                                 {char.qrList && char.qrList.length > 0 && (
+                                                     <div className={`mt-2 flex items-center gap-1.5 text-[10px] px-2 py-1 rounded-lg border w-fit ${theme === 'light' ? 'text-purple-600 bg-purple-50 border-purple-200' : 'text-purple-400 bg-purple-900/30 border-purple-800'}`}>
+                                                         <Zap className="w-3 h-3" />
+                                                         <span className="font-bold">有快速回复</span>
+                                                     </div>
+                                                 )}
+                                                 <div className="mt-3 flex gap-2">
+                                                     {!isLeft && otherChar.qrList && otherChar.qrList.length > 0 && (
+                                                         <button onClick={() => {
+                                                             if (window.confirm(`确定要从左侧卡片获取 QR 配置吗？这会覆盖当前卡的 QR。`)) {
+                                                                 if (onUpdate) {
+                                                                     onUpdate({
+                                                                         ...char,
+                                                                         qrList: otherChar.qrList,
+                                                                         extra_qr_data: otherChar.extra_qr_data,
+                                                                         qrFileName: otherChar.qrFileName
+                                                                     });
+                                                                     alert("QR 转移成功！");
+                                                                 }
+                                                             }
+                                                         }} className={`px-3 py-2 rounded-xl text-xs font-bold transition border ${theme === 'light' ? 'bg-purple-100 text-purple-700 hover:bg-purple-200 border-purple-300' : 'bg-purple-900/30 text-purple-400 hover:bg-purple-900/50 border-purple-800'}`} title="从左侧卡片转移快速回复">
+                                                             <ArrowRight className="w-3.5 h-3.5" />
+                                                         </button>
+                                                     )}
+                                                     <button onClick={() => {
+                                                         if (window.confirm(`确定要保留此卡，并删除另一张卡吗？`)) {
+                                                             onDelete(otherChar.id, true);
+                                                             setCompareModalOpen(false);
+                                                             setSelectedIds(new Set());
+                                                         }
+                                                     }} className={`flex-1 px-4 py-2 rounded-xl text-xs font-bold transition shadow-lg ${theme === 'light' ? 'bg-slate-800 text-white hover:bg-rose-500 shadow-gray-200' : 'bg-slate-700 text-white hover:bg-rose-600 shadow-black/50'}`}>保留此版本</button>
+                                                     {isLeft && otherChar.qrList && otherChar.qrList.length > 0 && (
+                                                         <button onClick={() => {
+                                                             if (window.confirm(`确定要从右侧卡片获取 QR 配置吗？这会覆盖当前卡的 QR。`)) {
+                                                                 if (onUpdate) {
+                                                                     onUpdate({
+                                                                         ...char,
+                                                                         qrList: otherChar.qrList,
+                                                                         extra_qr_data: otherChar.extra_qr_data,
+                                                                         qrFileName: otherChar.qrFileName
+                                                                     });
+                                                                     alert("QR 转移成功！");
+                                                                 }
+                                                             }
+                                                         }} className={`px-3 py-2 rounded-xl text-xs font-bold transition border ${theme === 'light' ? 'bg-purple-100 text-purple-700 hover:bg-purple-200 border-purple-300' : 'bg-purple-900/30 text-purple-400 hover:bg-purple-900/50 border-purple-800'}`} title="从右侧卡片转移快速回复">
+                                                             <ArrowLeft className="w-3.5 h-3.5" />
+                                                         </button>
+                                                     )}
+                                                 </div>
+                                             </div>
+                                        </div>
+
+                                        {/* 统计对比：Description */}
+                                        <div className={`p-5 rounded-3xl border shadow-sm ${isDescDiff ? (theme === 'light' ? 'ring-2 ring-rose-200 bg-rose-50/30' : 'ring-2 ring-rose-900 bg-rose-900/20') : (theme === 'light' ? 'bg-white border-gray-200' : 'bg-slate-800 border-white/10')}`}>
+                                            <div className="flex justify-between items-center mb-2">
+                                                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Description 字数</span>
+                                                <span className={`text-lg font-black font-mono ${isDescGreater ? 'text-green-600' : (theme === 'light' ? 'text-gray-700' : 'text-gray-300')}`}>
+                                                    {descLength}
+                                                </span>
+                                            </div>
+                                            <div className={`h-48 overflow-y-auto custom-scrollbar text-xs leading-relaxed font-mono p-3 rounded-xl border whitespace-pre-wrap ${theme === 'light' ? 'text-gray-600 bg-gray-50 border-gray-100' : 'text-gray-300 bg-slate-900/50 border-white/5'}`}>{char.description || ''}</div>
+                                        </div>
+
+                                        {/* 统计对比：First Message */}
+                                        <div className={`p-5 rounded-3xl border shadow-sm ${isFmDiff ? (theme === 'light' ? 'ring-2 ring-rose-200 bg-rose-50/30' : 'ring-2 ring-rose-900 bg-rose-900/20') : (theme === 'light' ? 'bg-white border-gray-200' : 'bg-slate-800 border-white/10')}`}>
+                                            <div className="flex justify-between items-center mb-2">
+                                                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">First Message 字数</span>
+                                                <span className={`text-lg font-black font-mono ${isFmGreater ? 'text-green-600' : (theme === 'light' ? 'text-gray-700' : 'text-gray-300')}`}>
+                                                    {fmLength}
+                                                </span>
+                                            </div>
+                                            <div className={`h-48 overflow-y-auto custom-scrollbar text-xs leading-relaxed font-mono p-3 rounded-xl border whitespace-pre-wrap ${theme === 'light' ? 'text-gray-600 bg-gray-50 border-gray-100' : 'text-gray-300 bg-slate-900/50 border-white/5'}`}>{char.firstMessage || ''}</div>
+                                        </div>
+
+                                        {/* 开场白统计 */}
+                                        <div className={`p-5 rounded-3xl border shadow-sm ${theme === 'light' ? 'bg-white border-gray-200' : 'bg-slate-800 border-white/10'}`}>
+                                            <div className="flex justify-between items-center mb-2">
+                                                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">开场白数量</span>
+                                                <span className="text-lg font-black font-mono text-green-600">
+                                                    {fmCount}
+                                                </span>
+                                            </div>
+                                            <div className="space-y-2">
+                                                <div className={`p-2 rounded-lg text-xs border ${isFmDiff ? (theme === 'light' ? 'ring-2 ring-rose-200 bg-rose-50/30 border-rose-100' : 'ring-2 ring-rose-900 bg-rose-900/20 border-rose-800') : (theme === 'light' ? 'bg-blue-50 border-blue-100' : 'bg-blue-900/20 border-blue-800')}`}>
+                                                    <span className={`font-bold ${theme === 'light' ? 'text-gray-700' : 'text-gray-300'}`}>主开场白:</span>
+                                                    <span className={`ml-2 font-bold ${isFmGreater ? 'text-blue-600' : (theme === 'light' ? 'text-gray-600' : 'text-gray-400')}`}>{fmLength} 字符</span>
+                                                </div>
+                                                {char.alternate_greetings && char.alternate_greetings.length > 0 && (
+                                                    <div className="space-y-1">
+                                                        {char.alternate_greetings.map((alt, idx) => {
+                                                            const altLength = alt?.length || 0;
+                                                            const otherAltLength = otherChar.alternate_greetings?.[idx]?.length || 0;
+                                                            const isAltDiff = altLength !== otherAltLength;
+                                                            const isAltGreater = altLength > otherAltLength;
+                                                            return (
+                                                                <div key={idx} className={`p-2 rounded-lg text-xs flex justify-between border ${isAltDiff ? (theme === 'light' ? 'ring-2 ring-rose-200 bg-rose-50/30 border-rose-100' : 'ring-2 ring-rose-900 bg-rose-900/20 border-rose-800') : (theme === 'light' ? 'bg-gray-50 border-gray-100' : 'bg-slate-900/50 border-white/5')}`}>
+                                                                    <span className={theme === 'light' ? 'text-gray-700' : 'text-gray-300'}>备用 #{idx+1}:</span>
+                                                                    <span className={`font-bold ${isAltGreater ? 'text-blue-600' : (theme === 'light' ? 'text-gray-600' : 'text-gray-400')}`}>{altLength} 字符</span>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {/* 世界书统计 */}
+                                        <div className={`p-5 rounded-3xl border shadow-sm ${theme === 'light' ? 'bg-white border-gray-200' : 'bg-slate-800 border-white/10'}`}>
+                                            <div className="flex justify-between items-center mb-2">
+                                                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">世界书 (Lorebook)</span>
+                                                <span className="text-lg font-black font-mono text-purple-600">
+                                                    {wbCount} 条
+                                                </span>
+                                            </div>
+                                            <div className={`p-3 rounded-lg ${theme === 'light' ? 'bg-purple-50' : 'bg-purple-900/20'}`}>
+                                                <div className={`text-xs mb-1 ${theme === 'light' ? 'text-gray-600' : 'text-gray-400'}`}>总字符数:</div>
+                                                <div className={`text-2xl font-black ${theme === 'light' ? 'text-purple-700' : 'text-purple-400'}`}>{wbTotalChars.toLocaleString()}</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            });
+                        })()}
+                    </div>
                 </div>
-              </Modal>
-          );
-      })()}
+            </div>
+        </div>
+      )}
 
       {/* View Character Modal */}
       {viewCharacter && (
@@ -1507,6 +1466,20 @@ const CharacterList: React.FC<CharacterListProps> = ({
             title={viewCharacter.name}
             theme={theme}
             maxWidth="max-w-2xl"
+            headerActions={
+              <button 
+                onClick={() => {
+                  if (window.confirm(`确定删除 ${viewCharacter.name} 吗?`)) {
+                    onDelete(viewCharacter.id, true);
+                    setViewCharacter(null);
+                  }
+                }}
+                className={`p-1 rounded-full transition-colors ${theme === 'light' ? 'hover:bg-red-100 text-red-500' : 'hover:bg-red-500/20 text-red-400'}`}
+                title="删除角色"
+              >
+                <Trash2 size={20} />
+              </button>
+            }
           >
             <div className="flex flex-col gap-6">
                 <div className="flex gap-6">
@@ -1533,22 +1506,10 @@ const CharacterList: React.FC<CharacterListProps> = ({
                                 <span className="opacity-70">导入时间:</span>
                                 <span>{new Date(viewCharacter.importDate || 0).toLocaleString()}</span>
                             </div>
-                            {(viewCharacter as any).fileLastModified && (
-                                <div className={`flex items-center gap-2 ${theme === 'light' ? 'text-gray-600' : 'text-gray-400'}`}>
-                                    <span className="opacity-70">文件修改:</span>
-                                    <span>{new Date((viewCharacter as any).fileLastModified).toLocaleString()}</span>
-                                </div>
-                            )}
-                            {viewCharacter.note && (
-                                <div className={`mt-2 flex items-start gap-2 ${theme === 'light' ? 'text-gray-600' : 'text-gray-400'}`}>
-                                    <span className="opacity-70 shrink-0">备注:</span>
-                                    {/^https?:\/\//.test(viewCharacter.note) ? (
-                                        <a href={viewCharacter.note} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 truncate underline" title={viewCharacter.note}>
-                                            {viewCharacter.note}
-                                        </a>
-                                    ) : (
-                                        <span className="break-all">{viewCharacter.note}</span>
-                                    )}
+                            {viewCharacter.fileLastModified && (
+                                <div className="flex items-center gap-2">
+                                    <span className="opacity-70">本地修改:</span>
+                                    <span>{new Date(viewCharacter.fileLastModified).toLocaleString()}</span>
                                 </div>
                             )}
                         </div>
@@ -1583,16 +1544,6 @@ const CharacterList: React.FC<CharacterListProps> = ({
                 </div>
 
                 <div className={`space-y-4 p-4 rounded-xl max-h-[400px] overflow-y-auto custom-scrollbar ${theme === 'light' ? 'bg-gray-50' : 'bg-white/5'}`}>
-                    {viewCharacter.creator_notes && (
-                        <div>
-                            <h4 className="font-bold opacity-70 mb-2 text-xs uppercase tracking-wider flex items-center gap-1.5">
-                                <span>👤</span> 作者备注 (Creator Notes)
-                            </h4>
-                            <div className={`p-3 rounded-xl text-xs leading-relaxed whitespace-pre-wrap opacity-80 ${theme === 'light' ? 'bg-white border border-gray-100 text-gray-700' : 'bg-black/20 text-gray-300'}`}>
-                                {viewCharacter.creator_notes}
-                            </div>
-                        </div>
-                    )}
                     {viewCharacter.description && (
                         <div>
                             <h4 className="font-bold opacity-70 mb-2 text-xs uppercase tracking-wider">描述 (Description)</h4>
@@ -1618,6 +1569,31 @@ const CharacterList: React.FC<CharacterListProps> = ({
                         <div>
                             <h4 className="font-bold opacity-70 mb-2 text-xs uppercase tracking-wider">场景 (Scenario)</h4>
                             <p className="whitespace-pre-wrap text-sm leading-relaxed opacity-90">{viewCharacter.scenario}</p>
+                        </div>
+                    )}
+                    
+                    {viewCharacter.character_book?.entries && viewCharacter.character_book.entries.length > 0 && (
+                        <div>
+                            <h4 className="font-bold opacity-70 mb-2 text-xs uppercase tracking-wider flex items-center gap-2">
+                                <BookOpen size={14} /> 世界书 (World Info) - {viewCharacter.character_book.entries.length} 条
+                            </h4>
+                            <div className="space-y-2">
+                                {viewCharacter.character_book.entries.map((entry, idx) => (
+                                    <div key={idx} className={`p-3 rounded-lg border ${theme === 'light' ? 'bg-white border-slate-200' : 'bg-black/20 border-white/10'}`}>
+                                        {entry.name && (
+                                            <div className="font-bold text-sm mb-1 opacity-90">{entry.name}</div>
+                                        )}
+                                        <div className="flex flex-wrap gap-1 mb-2">
+                                            {entry.keys.map((key, i) => (
+                                                <span key={i} className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${theme === 'light' ? 'bg-indigo-100 text-indigo-700' : 'bg-indigo-500/20 text-indigo-300'}`}>
+                                                    {key}
+                                                </span>
+                                            ))}
+                                        </div>
+                                        <p className="whitespace-pre-wrap text-sm leading-relaxed opacity-90">{entry.content}</p>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
                     )}
                 </div>

@@ -4,18 +4,6 @@ export interface QrItem {
   label: string;
   message: string;
   preventAutoExecute?: boolean;
-  showLabel?: boolean;
-  title?: string;
-  contextList?: any[];
-  isHidden?: boolean;
-  executeOnStartup?: boolean;
-  executeOnUser?: boolean;
-  executeOnAi?: boolean;
-  executeOnChatChange?: boolean;
-  executeOnGroupMemberDraft?: boolean;
-  executeOnNewChat?: boolean;
-  automationId?: string;
-  [key: string]: any;
 }
 
 export interface CharacterBookEntry {
@@ -28,26 +16,12 @@ export interface CharacterBookEntry {
   priority?: number;
   id?: number;
   comment?: string;
-  // ST完整字段
-  secondary_keys?: string[];
-  constant?: boolean;
-  selective?: boolean;
-  position?: string;
-  use_regex?: boolean;
-  extensions?: Record<string, any>;
-  [key: string]: any; // 兼容未来新增字段
 }
 
 export interface CharacterBook {
   name?: string;
   description?: string;
   entries: CharacterBookEntry[];
-  // ST完整字段
-  scan_depth?: number;
-  token_budget?: number;
-  recursive_scanning?: boolean;
-  extensions?: Record<string, any>;
-  [key: string]: any;
 }
 
 export interface Character {
@@ -56,26 +30,30 @@ export interface Character {
   description: string;
   personality: string;
   firstMessage: string;
-  alternate_greetings?: string[];
+  alternate_greetings?: string[]; // Added: Alternate greetings support
   avatarUrl: string;
   scenario?: string;
+  mes_example?: string;
+  creator_notes?: string;
+  system_prompt?: string;
+  post_history_instructions?: string;
+  creator?: string;
+  character_version?: string;
+  extensions?: any;
   character_book?: CharacterBook;
-  tags?: string[];
+  tags?: string[]; // Added: Tags support
   qrList?: QrItem[];
   originalFilename?: string;
   sourceUrl?: string;
   cardUrl?: string;
-  creator_notes?: string;
   importDate?: number;
-  extra_qr_data?: any;         // 原始QR文件完整数据（含idIndex等所有字段）
-  _rawCardData?: any;          // 导入时的原始完整卡片数据，导出时用于精确还原
+  fileLastModified?: number;
+  extra_qr_data?: any; // Store full QR JSON object for export
   qrFileName?: string;
   isFavorite?: boolean;
   folder?: string;
   importFormat?: 'png' | 'json' | 'unknown';
   updatedAt?: number;
-  fileLastModified?: number;
-  note?: string;               // 备注/原帖链接（如 Discord 原帖 URL）
 }
 
 export interface Message {

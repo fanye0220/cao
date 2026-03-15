@@ -9,9 +9,10 @@ interface ModalProps {
   children: React.ReactNode;
   theme?: 'light' | 'dark';
   maxWidth?: string;
+  headerActions?: React.ReactNode;
 }
 
-const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, theme = 'dark', maxWidth = 'max-w-lg' }) => {
+const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, theme = 'dark', maxWidth = 'max-w-lg', headerActions }) => {
   if (!isOpen) return null;
 
   return createPortal(
@@ -28,12 +29,15 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, theme =
         {/* Header */}
         <div className={`flex items-center justify-between px-6 py-4 border-b ${theme === 'light' ? 'border-slate-200/50' : 'border-white/10'}`}>
           <h3 className="text-lg font-semibold">{title}</h3>
-          <button 
-            onClick={onClose}
-            className={`p-1 rounded-full transition-colors ${theme === 'light' ? 'hover:bg-slate-100 text-slate-500' : 'hover:bg-white/10 text-slate-400'}`}
-          >
-            <X size={20} />
-          </button>
+          <div className="flex items-center gap-2">
+            {headerActions}
+            <button 
+              onClick={onClose}
+              className={`p-1 rounded-full transition-colors ${theme === 'light' ? 'hover:bg-slate-100 text-slate-500' : 'hover:bg-white/10 text-slate-400'}`}
+            >
+              <X size={20} />
+            </button>
+          </div>
         </div>
 
         {/* Content */}
