@@ -26,8 +26,9 @@ interface CharacterListProps {
 interface ImportResults {
   success: number;
   failed: number;
-  failedFiles: string[];
-  duplicates: string[];
+  invalidFormatFiles: string[];
+  duplicateFiles: string[];
+  otherFailedFiles: string[];
 }
 
 const CharacterList: React.FC<CharacterListProps> = ({ 
@@ -435,8 +436,9 @@ const CharacterList: React.FC<CharacterListProps> = ({
 
     let successCount = 0;
     let failCount = 0;
-    const failedFiles: string[] = [];
-    const duplicates: string[] = [];
+    const invalidFormatFiles: string[] = [];
+    const duplicateFiles: string[] = [];
+    const otherFailedFiles: string[] = [];
     const fileArray = Array.from(files) as File[];
     const validChars: Character[] = [];
 
@@ -465,10 +467,12 @@ const CharacterList: React.FC<CharacterListProps> = ({
 
         const isDuplicateName = characters.some(c => c.name === char.name);
         if (isDuplicateName) {
-            duplicates.push(char.name);
-             if (files.length === 1) {
-                setWarning(`注意：检测到可能重复的角色 "${char.name}"`);
-             }
+            duplicateFiles.push(file.name);
+            failCount++;
+            if (files.length === 1) {
+                setWarning(`注意：检测到重复的角色 "${char.name}"，已跳过导入`);
+            }
+            continue; // Skip importing duplicate
         }
         
         validChars.push(char);
@@ -476,7 +480,12 @@ const CharacterList: React.FC<CharacterListProps> = ({
       } catch (err: any) {
         console.error(`Failed to import ${file.name}:`, err);
         failCount++;
-        failedFiles.push(`${file.name}: ${err.message}`);
+        const msg = err.message || "";
+        if (msg.includes("不是有效的 PNG 文件") || msg.includes("未在此图片中找到角色数据") || msg.includes("Invalid JSON file") || msg.includes("无效的")) {
+            invalidFormatFiles.push(file.name);
+        } else {
+            otherFailedFiles.push(file.name);
+        }
       }
     }
 
@@ -489,8 +498,8 @@ const CharacterList: React.FC<CharacterListProps> = ({
     }
 
     setImportingCount(0);
-    if (failCount > 0 || (duplicates.length > 0 && files.length > 1)) {
-        setImportResults({ success: successCount, failed: failCount, failedFiles, duplicates });
+    if (failCount > 0) {
+        setImportResults({ success: successCount, failed: failCount, invalidFormatFiles, duplicateFiles, otherFailedFiles });
         setImportErrorModalOpen(true);
     } else if (files.length > 1) {
         // Optional: show success toast for bulk import
@@ -1241,19 +1250,19 @@ const CharacterList: React.FC<CharacterListProps> = ({
                     <AlertCircle size={16} /> 失败: {importResults?.failed}
                  </div>
              )}
-             {importResults && importResults.duplicates.length > 0 && (
+             {importResults && (importResults as ImportResults).duplicateFiles.length > 0 && (
                  <div className="flex items-center gap-1 text-yellow-500 font-bold">
-                    <AlertTriangle size={16} /> 重复: {importResults?.duplicates.length}
+                    <AlertTriangle size={16} /> 重复: {(importResults as ImportResults).duplicateFiles.length}
                  </div>
              )}
           </div>
           
-          {importResults && (importResults as ImportResults).failedFiles.length > 0 && (
+          {importResults && (importResults as ImportResults).invalidFormatFiles.length > 0 && (
             <div className="mt-4">
-              <h4 className="font-semibold mb-2 text-sm uppercase tracking-wider opacity-70">失败文件详情</h4>
+              <h4 className="font-semibold mb-2 text-sm uppercase tracking-wider opacity-70">非酒馆卡 (格式无效)</h4>
               <div className={`rounded-lg p-3 text-sm font-mono overflow-x-auto max-h-32 overflow-y-auto custom-scrollbar ${theme === 'light' ? 'bg-red-50 text-red-800' : 'bg-red-900/20 text-red-200'}`}>
                 <ul className="list-disc list-inside space-y-1">
-                  {(importResults as ImportResults).failedFiles.map((msg, idx) => (
+                  {(importResults as ImportResults).invalidFormatFiles.map((msg, idx) => (
                     <li key={idx} className="break-all">{msg}</li>
                   ))}
                 </ul>
@@ -1261,14 +1270,26 @@ const CharacterList: React.FC<CharacterListProps> = ({
             </div>
           )}
 
-          {importResults && (importResults as ImportResults).duplicates.length > 0 && (
+          {importResults && (importResults as ImportResults).duplicateFiles.length > 0 && (
             <div className="mt-4">
-              <h4 className="font-semibold mb-2 text-sm uppercase tracking-wider opacity-70">重复角色 (已导入)</h4>
+              <h4 className="font-semibold mb-2 text-sm uppercase tracking-wider opacity-70">重复文件 (已跳过)</h4>
               <div className={`rounded-lg p-3 text-sm font-mono overflow-x-auto max-h-32 overflow-y-auto custom-scrollbar ${theme === 'light' ? 'bg-yellow-50 text-yellow-800' : 'bg-yellow-900/20 text-yellow-200'}`}>
-                <p className="mb-2 text-xs opacity-70">以下角色名称已存在，但仍已导入为新卡片：</p>
                 <ul className="list-disc list-inside space-y-1">
-                  {(importResults as ImportResults).duplicates.map((name, idx) => (
+                  {(importResults as ImportResults).duplicateFiles.map((name, idx) => (
                     <li key={idx} className="break-all">{name}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+
+          {importResults && (importResults as ImportResults).otherFailedFiles.length > 0 && (
+            <div className="mt-4">
+              <h4 className="font-semibold mb-2 text-sm uppercase tracking-wider opacity-70">其他错误</h4>
+              <div className={`rounded-lg p-3 text-sm font-mono overflow-x-auto max-h-32 overflow-y-auto custom-scrollbar ${theme === 'light' ? 'bg-red-50 text-red-800' : 'bg-red-900/20 text-red-200'}`}>
+                <ul className="list-disc list-inside space-y-1">
+                  {(importResults as ImportResults).otherFailedFiles.map((msg, idx) => (
+                    <li key={idx} className="break-all">{msg}</li>
                   ))}
                 </ul>
               </div>
