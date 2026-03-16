@@ -1,20 +1,22 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Glass Tavern
 
-# Run and deploy your AI Studio app
+A character card manager for SillyTavern with a glassmorphism UI.
 
-This contains everything you need to run your app locally.
+## 🔑 API Key
 
-View your app in AI Studio: https://ai.studio/apps/8a79cb8a-24b9-4828-94a6-13976afc7a9d
+No secrets needed! Users enter their own Gemini API key directly in the app.  
+The key is saved in the browser's `localStorage` and never leaves the device.
 
-## Run Locally
+## 🚀 Deploy to GitHub Pages
 
-**Prerequisites:**  Node.js
+1. Push this repo to GitHub
+2. Go to **Settings → Pages → Source** and select **GitHub Actions**
+3. Push to `main` branch — it auto-builds and deploys. No secrets required.
 
+## Development
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+```bash
+npm install
+npm run dev
+# Enter your Gemini API key in the app UI
+```

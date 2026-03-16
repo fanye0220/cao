@@ -3,8 +3,9 @@ import { Character, ViewMode, Theme } from './types';
 import CharacterList from './components/CharacterList';
 import CharacterForm from './components/CharacterForm';
 import { DEFAULT_CHARACTERS } from './constants';
-import { Moon, Sun } from 'lucide-react';
+import { Moon, Sun, Key, X, Eye, EyeOff } from 'lucide-react';
 import { loadImage, deleteImage, saveImage } from './services/imageService';
+import { hasApiKey, saveApiKey, clearApiKey } from './services/geminiService';
 
 function App() {
   // Load characters from localStorage or use defaults
@@ -24,6 +25,25 @@ function App() {
   
   // Theme state: default is 'dark'
   const [theme, setTheme] = useState<Theme>('dark');
+
+  // API Key modal state
+  const [showKeyModal, setShowKeyModal] = useState<boolean>(!hasApiKey());
+  const [keyInput, setKeyInput] = useState('');
+  const [showKey, setShowKey] = useState(false);
+
+  const handleSaveKey = () => {
+    if (keyInput.trim()) {
+      saveApiKey(keyInput.trim());
+      setKeyInput('');
+      setShowKeyModal(false);
+    }
+  };
+
+  const handleClearKey = () => {
+    clearApiKey();
+    setKeyInput('');
+    setShowKeyModal(true);
+  };
 
   // Folders state
   const [folders, setFolders] = useState<string[]>(() => {
@@ -206,7 +226,18 @@ function App() {
       <main className="relative z-10 w-full h-screen flex flex-col p-4 md:p-6 lg:p-8">
         
         {/* Top Controls */}
-        <div className="absolute top-6 right-6 z-50">
+        <div className="absolute top-6 right-6 z-50 flex items-center gap-2">
+          <button
+            onClick={() => setShowKeyModal(true)}
+            className={`p-3 rounded-full backdrop-blur-md border transition-all duration-300 shadow-lg
+              ${hasApiKey()
+                ? (theme === 'light' ? 'bg-green-100/80 text-green-700 border-green-300 hover:bg-green-100' : 'bg-green-500/20 text-green-400 border-green-500/30 hover:bg-green-500/30')
+                : (theme === 'light' ? 'bg-red-100/80 text-red-600 border-red-300 hover:bg-red-100' : 'bg-red-500/20 text-red-400 border-red-500/30 hover:bg-red-500/30')}
+            `}
+            title="管理 Gemini API Key"
+          >
+            <Key size={20} />
+          </button>
           <button 
             onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
             className={`p-3 rounded-full backdrop-blur-md border transition-all duration-300 shadow-lg
@@ -219,6 +250,83 @@ function App() {
             {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
           </button>
         </div>
+
+        {/* API Key Modal */}
+        {showKeyModal && (
+          <div className="fixed inset-0 z-[200] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className={`w-full max-w-md rounded-3xl shadow-2xl p-8 border animate-fade-in
+              ${theme === 'light' ? 'bg-white border-slate-200' : 'bg-slate-900 border-white/10'}`}
+            >
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2.5 rounded-xl ${theme === 'light' ? 'bg-blue-100' : 'bg-blue-500/20'}`}>
+                    <Key size={20} className="text-blue-500" />
+                  </div>
+                  <div>
+                    <h2 className={`text-lg font-black ${theme === 'light' ? 'text-slate-800' : 'text-white'}`}>Gemini API Key</h2>
+                    <p className={`text-xs ${theme === 'light' ? 'text-slate-400' : 'text-gray-500'}`}>仅保存在本地浏览器，不会上传</p>
+                  </div>
+                </div>
+                {hasApiKey() && (
+                  <button onClick={() => setShowKeyModal(false)} className={`p-2 rounded-full transition-colors ${theme === 'light' ? 'hover:bg-slate-100 text-slate-400' : 'hover:bg-white/10 text-gray-500'}`}>
+                    <X size={18} />
+                  </button>
+                )}
+              </div>
+
+              {hasApiKey() && (
+                <div className={`mb-4 px-4 py-3 rounded-xl flex items-center gap-2 text-sm font-medium
+                  ${theme === 'light' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-green-500/10 text-green-400 border border-green-500/20'}`}>
+                  <span className="w-2 h-2 rounded-full bg-green-500 shrink-0"></span>
+                  已设置 API Key
+                </div>
+              )}
+
+              <div className="relative mb-4">
+                <input
+                  type={showKey ? 'text' : 'password'}
+                  value={keyInput}
+                  onChange={(e) => setKeyInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSaveKey(); }}
+                  placeholder={hasApiKey() ? "输入新 key 以替换..." : "AIza..."}
+                  className={`w-full px-4 py-3 pr-12 rounded-xl border text-sm outline-none transition-colors
+                    ${theme === 'light'
+                      ? 'bg-slate-50 border-slate-200 text-slate-800 placeholder-slate-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-100'
+                      : 'bg-white/5 border-white/10 text-white placeholder-gray-600 focus:border-blue-500/50 focus:bg-white/10'}`}
+                />
+                <button
+                  onClick={() => setShowKey(!showKey)}
+                  className={`absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded transition-colors ${theme === 'light' ? 'text-slate-400 hover:text-slate-600' : 'text-gray-600 hover:text-gray-300'}`}
+                >
+                  {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+
+              <p className={`text-xs mb-6 ${theme === 'light' ? 'text-slate-400' : 'text-gray-600'}`}>
+                前往 <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-blue-500 underline hover:text-blue-400">Google AI Studio</a> 免费获取 API Key
+              </p>
+
+              <div className="flex gap-3">
+                {hasApiKey() && (
+                  <button
+                    onClick={handleClearKey}
+                    className={`px-4 py-2.5 rounded-xl text-sm font-bold transition-colors border flex items-center gap-2
+                      ${theme === 'light' ? 'border-red-200 text-red-500 hover:bg-red-50' : 'border-red-500/20 text-red-400 hover:bg-red-500/10'}`}
+                  >
+                    <X size={14} /> 清除
+                  </button>
+                )}
+                <button
+                  onClick={handleSaveKey}
+                  disabled={!keyInput.trim()}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold bg-blue-600 hover:bg-blue-500 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-blue-500/20"
+                >
+                  保存
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Views */}
         <div className="flex-1 flex flex-col min-h-0">

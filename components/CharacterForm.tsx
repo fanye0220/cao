@@ -466,89 +466,107 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
              </div>
           </GlassCard>
 
-          {/* 1.5 Character Status Info (Read-only / Display) */}
+          {/* 1.5 Character Status Info (Editable if exists) */}
           {(formData.creator_notes || formData.system_prompt || formData.post_history_instructions || formData.scenario || formData.personality || formData.mes_example) && (
               <GlassCard theme={theme} className="p-6 mb-6 !bg-opacity-60">
                   <div className={sectionTitle}><Info size={20}/> 角色详细信息</div>
-                  <div className="space-y-4">
+                  <div className="space-y-6">
                       {/* Creator Notes */}
                       {(formData.creator_notes || formData.extensions?.chub?.version) && (
-                          <div className="space-y-1.5">
-                              <div className={`text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 ${theme === 'light' ? 'text-gray-400' : 'text-gray-400'}`}>
+                          <div>
+                              <div className={`text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 mb-2 ${theme === 'light' ? 'text-gray-500' : 'text-gray-400'}`}>
                                   <UserPen className="w-3 h-3" /> 作者备注
                                   {formData.extensions?.chub?.version && (
                                       <span className="text-[10px] font-medium normal-case ml-1">v{formData.extensions.chub.version}</span>
                                   )}
                               </div>
-                              {formData.creator_notes ? (
-                                  <div className={`rounded-xl p-4 text-xs leading-relaxed border whitespace-pre-wrap ${theme === 'light' ? 'bg-white text-gray-700 border-gray-100' : 'bg-slate-800 text-gray-300 border-white/10'}`}>
-                                      {formData.creator_notes}
-                                  </div>
-                              ) : (
-                                  <div className={`rounded-xl p-4 text-xs leading-relaxed border italic ${theme === 'light' ? 'bg-white text-gray-400 border-gray-100' : 'bg-slate-800 text-gray-500 border-white/10'}`}>
-                                      暂无作者备注
-                                  </div>
-                              )}
+                              <textarea 
+                                  rows={3}
+                                  value={formData.creator_notes || ''}
+                                  onChange={e => setFormData({...formData, creator_notes: e.target.value})}
+                                  className={`w-full rounded-xl px-4 py-3 text-sm resize-y outline-none transition-all custom-scrollbar ${inputBg}`}
+                                  placeholder="作者备注..."
+                              />
                           </div>
                       )}
 
                       {/* Personality */}
                       {formData.personality && (
-                          <div className="space-y-1.5">
-                              <div className={`text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 ${theme === 'light' ? 'text-gray-400' : 'text-gray-400'}`}>
+                          <div>
+                              <div className={`text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 mb-2 ${theme === 'light' ? 'text-gray-500' : 'text-gray-400'}`}>
                                   <Smile className="w-3 h-3" /> 性格特征
                               </div>
-                              <div className={`rounded-xl p-4 text-xs leading-relaxed border whitespace-pre-wrap ${theme === 'light' ? 'bg-white text-gray-700 border-gray-100' : 'bg-slate-800 text-gray-300 border-white/10'}`}>
-                                  {formData.personality}
-                              </div>
+                              <textarea 
+                                  rows={4}
+                                  value={formData.personality || ''}
+                                  onChange={e => setFormData({...formData, personality: e.target.value})}
+                                  className={`w-full rounded-xl px-4 py-3 text-sm resize-y outline-none transition-all custom-scrollbar ${inputBg}`}
+                                  placeholder="性格特征..."
+                              />
                           </div>
                       )}
 
                       {/* Scenario */}
                       {formData.scenario && (
-                          <div className="space-y-1.5">
-                              <div className={`text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 ${theme === 'light' ? 'text-gray-400' : 'text-gray-400'}`}>
+                          <div>
+                              <div className={`text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 mb-2 ${theme === 'light' ? 'text-gray-500' : 'text-gray-400'}`}>
                                   <Map className="w-3 h-3" /> 场景设定
                               </div>
-                              <div className={`rounded-xl p-4 text-xs leading-relaxed border whitespace-pre-wrap ${theme === 'light' ? 'bg-white text-gray-700 border-gray-100' : 'bg-slate-800 text-gray-300 border-white/10'}`}>
-                                  {formData.scenario}
-                              </div>
+                              <textarea 
+                                  rows={4}
+                                  value={formData.scenario || ''}
+                                  onChange={e => setFormData({...formData, scenario: e.target.value})}
+                                  className={`w-full rounded-xl px-4 py-3 text-sm resize-y outline-none transition-all custom-scrollbar ${inputBg}`}
+                                  placeholder="场景设定..."
+                              />
                           </div>
                       )}
 
                       {/* Message Examples */}
                       {formData.mes_example && (
-                          <div className="space-y-1.5">
-                              <div className={`text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 ${theme === 'light' ? 'text-gray-400' : 'text-gray-400'}`}>
+                          <div>
+                              <div className={`text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 mb-2 ${theme === 'light' ? 'text-gray-500' : 'text-gray-400'}`}>
                                   <MessageSquareQuote className="w-3 h-3" /> 对话示例
                               </div>
-                              <div className={`rounded-xl p-4 text-xs leading-relaxed border font-mono whitespace-pre-wrap ${theme === 'light' ? 'bg-white text-gray-700 border-gray-100' : 'bg-slate-800 text-gray-300 border-white/10'}`}>
-                                  {formData.mes_example}
-                              </div>
+                              <textarea 
+                                  rows={6}
+                                  value={formData.mes_example || ''}
+                                  onChange={e => setFormData({...formData, mes_example: e.target.value})}
+                                  className={`w-full rounded-xl px-4 py-3 text-sm resize-y outline-none transition-all font-mono custom-scrollbar ${inputBg}`}
+                                  placeholder="对话示例..."
+                              />
                           </div>
                       )}
 
                       {/* System Prompt */}
                       {formData.system_prompt && (
-                          <div className="space-y-1.5">
-                              <div className={`text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 ${theme === 'light' ? 'text-gray-400' : 'text-gray-400'}`}>
+                          <div>
+                              <div className={`text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 mb-2 ${theme === 'light' ? 'text-gray-500' : 'text-gray-400'}`}>
                                   <Terminal className="w-3 h-3" /> 系统提示词
                               </div>
-                              <div className={`rounded-xl p-4 text-xs leading-relaxed border font-mono whitespace-pre-wrap ${theme === 'light' ? 'bg-white text-gray-700 border-gray-100' : 'bg-slate-800 text-gray-300 border-white/10'}`}>
-                                  {formData.system_prompt}
-                              </div>
+                              <textarea 
+                                  rows={4}
+                                  value={formData.system_prompt || ''}
+                                  onChange={e => setFormData({...formData, system_prompt: e.target.value})}
+                                  className={`w-full rounded-xl px-4 py-3 text-sm resize-y outline-none transition-all font-mono custom-scrollbar ${inputBg}`}
+                                  placeholder="系统提示词..."
+                              />
                           </div>
                       )}
 
                       {/* Post History Instructions */}
                       {formData.post_history_instructions && (
-                          <div className="space-y-1.5">
-                              <div className={`text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 ${theme === 'light' ? 'text-gray-400' : 'text-gray-400'}`}>
+                          <div>
+                              <div className={`text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 mb-2 ${theme === 'light' ? 'text-gray-500' : 'text-gray-400'}`}>
                                   <ScrollText className="w-3 h-3" /> 历史记录指令
                               </div>
-                              <div className={`rounded-xl p-4 text-xs leading-relaxed border font-mono whitespace-pre-wrap ${theme === 'light' ? 'bg-white text-gray-700 border-gray-100' : 'bg-slate-800 text-gray-300 border-white/10'}`}>
-                                  {formData.post_history_instructions}
-                              </div>
+                              <textarea 
+                                  rows={4}
+                                  value={formData.post_history_instructions || ''}
+                                  onChange={e => setFormData({...formData, post_history_instructions: e.target.value})}
+                                  className={`w-full rounded-xl px-4 py-3 text-sm resize-y outline-none transition-all font-mono custom-scrollbar ${inputBg}`}
+                                  placeholder="历史记录指令..."
+                              />
                           </div>
                       )}
                   </div>

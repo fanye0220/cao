@@ -334,9 +334,9 @@ const CharacterList: React.FC<CharacterListProps> = ({
     return groupedCharacters.slice(startIndex, startIndex + itemsPerPage);
   }, [groupedCharacters, currentPage, itemsPerPage]);
 
-  const totalPages = activeFilter.type === 'duplicate' 
-    ? Math.ceil((groupedCharacters?.length || 0) / itemsPerPage)
-    : Math.ceil(filteredCharacters.length / itemsPerPage);
+  const totalPages = activeFilter.type === 'duplicate' && groupedCharacters
+      ? Math.ceil(groupedCharacters.length / itemsPerPage)
+      : Math.ceil(filteredCharacters.length / itemsPerPage);
 
   const renderCharacterCard = (char: Character) => {
     const isDuplicate = duplicateIds.has(char.id);
@@ -468,11 +468,9 @@ const CharacterList: React.FC<CharacterListProps> = ({
         const isDuplicateName = characters.some(c => c.name === char.name);
         if (isDuplicateName) {
             duplicateFiles.push(file.name);
-            failCount++;
             if (files.length === 1) {
-                setWarning(`注意：检测到重复的角色 "${char.name}"，已跳过导入`);
+                setWarning(`注意：检测到重复的角色 "${char.name}"，已导入`);
             }
-            continue; // Skip importing duplicate
         }
         
         validChars.push(char);
@@ -1124,7 +1122,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
       {warning && <div className="mb-4 mx-2 p-3 bg-yellow-500/20 border border-yellow-500/40 rounded-xl flex items-center gap-3 text-yellow-100 backdrop-blur-md text-sm"><AlertTriangle className="text-yellow-400" size={16} />{warning}</div>}
 
         {/* Grid */}
-      <div className="flex-1 overflow-y-auto min-h-0 pb-20 custom-scrollbar">
+      <div className="flex-1 overflow-y-auto min-h-0 pb-20 custom-scrollbar relative">
         {activeFilter.type === 'duplicate' && groupedCharacters ? (
             <div className="px-2 space-y-8">
                 {displayGroups.map(([name, chars]) => (
@@ -1155,83 +1153,75 @@ const CharacterList: React.FC<CharacterListProps> = ({
             </div>
         )}
       </div>
-
-      {/* Pagination - Fixed at Bottom */}
-      {totalPages > 1 && (
-            <div className={`absolute bottom-0 left-0 right-0 z-10 flex justify-between items-center gap-4 px-4 py-3 border-t backdrop-blur-md ${theme === 'light' ? 'bg-white/[0.37] border-slate-200' : 'bg-[#1a1b1e]/[0.37] border-white/10'}`}>
-                {/* Left: Items Per Page */}
-                <div className="flex items-center gap-2">
-                    <span className={`text-xs font-medium ${theme === 'light' ? 'text-slate-500' : 'text-gray-400'}`}>每页显示</span>
-                    <div className="relative">
-                        <select 
-                            value={itemsPerPage}
-                            onChange={(e) => setItemsPerPage(Number(e.target.value))}
-                            className={`appearance-none pl-3 pr-8 py-1.5 rounded-lg text-xs font-bold outline-none cursor-pointer transition-colors ${theme === 'light' ? 'bg-slate-100 hover:bg-slate-200 text-slate-700' : 'bg-white/10 hover:bg-white/20 text-white'}`}
-                        >
-                            {[20, 30, 50, 100, 250, 500, 1000].map(size => (
-                                <option key={size} value={size} className="text-black">{size}</option>
-                            ))}
-                        </select>
-                        <ChevronDown size={12} className={`absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none ${theme === 'light' ? 'text-slate-500' : 'text-white/50'}`} />
-                    </div>
-                </div>
-
-                {/* Center: Navigation */}
-                <div className={`flex items-center gap-4 px-4 py-1.5 rounded-xl ${theme === 'light' ? 'bg-slate-50' : 'bg-white/5'}`}>
-                    <button 
-                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))} 
-                        disabled={currentPage === 1} 
-                        className={`p-1.5 rounded-lg transition-colors disabled:opacity-30 ${theme === 'light' ? 'hover:bg-slate-200 text-slate-600' : 'hover:bg-white/10 text-gray-300'}`}
-                    >
-                        <ChevronLeft size={16} />
-                    </button>
-                    <span className={`text-xs font-bold font-mono ${theme === 'light' ? 'text-slate-700' : 'text-gray-200'}`}>
-                        {currentPage} / {totalPages}
-                    </span>
-                    <button 
-                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} 
-                        disabled={currentPage === totalPages} 
-                        className={`p-1.5 rounded-lg transition-colors disabled:opacity-30 ${theme === 'light' ? 'hover:bg-slate-200 text-slate-600' : 'hover:bg-white/10 text-gray-300'}`}
-                    >
-                        <ChevronRight size={16} />
-                    </button>
-                </div>
-
-                {/* Right: Jump To */}
-                <div className="flex items-center gap-2">
-                    <span className={`text-xs font-medium ${theme === 'light' ? 'text-slate-500' : 'text-gray-400'}`}>跳转至</span>
-                    <input 
-                        type="number" 
-                        min={1} 
-                        max={totalPages}
-                        value={jumpPage}
-                        onChange={(e) => setJumpPage(e.target.value)}
-                        onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                                const page = parseInt(jumpPage);
-                                if (page >= 1 && page <= totalPages) {
-                                    setCurrentPage(page);
-                                    setJumpPage('');
-                                }
-                            }
-                        }}
-                        className={`w-12 px-2 py-1.5 text-center text-xs font-bold rounded-lg outline-none transition-all ${theme === 'light' ? 'bg-white border border-slate-200 focus:border-blue-500 text-slate-700' : 'bg-black/20 border border-white/10 focus:border-blue-500/50 text-white'}`}
-                    />
-                    <button 
-                        onClick={() => {
-                            const page = parseInt(jumpPage);
-                            if (page >= 1 && page <= totalPages) {
-                                setCurrentPage(page);
-                                setJumpPage('');
-                            }
-                        }}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-colors ${theme === 'light' ? 'bg-slate-800 hover:bg-slate-900' : 'bg-white/10 hover:bg-white/20'}`}
-                    >
-                        Go
-                    </button>
-                </div>
-            </div>
-        )}
+      
+      {/* Unified Pagination */}
+      {(activeFilter.type === 'duplicate' ? (groupedCharacters && groupedCharacters.length > 0) : filteredCharacters.length > 0) && (
+          <div className={`mt-4 pt-4 border-t flex flex-wrap items-center justify-between gap-4 p-4 rounded-2xl shadow-sm z-10 sticky bottom-0 shrink-0 ${theme === 'light' ? 'bg-white/60 backdrop-blur-md border-gray-100 shadow-[0_-4px_20px_rgba(0,0,0,0.06)]' : 'bg-slate-900/[0.38] backdrop-blur-md border-white/[0.08] shadow-[0_-4px_20px_rgba(0,0,0,0.3)]'}`}>
+              <div className="flex items-center gap-3">
+                  <span className={`text-xs font-bold ${theme === 'light' ? 'text-gray-500' : 'text-gray-400'}`}>每页显示</span>
+                  <select 
+                      value={itemsPerPage}
+                      onChange={(e) => setItemsPerPage(Number(e.target.value))}
+                      className={`rounded-xl text-xs font-bold py-2 px-3 outline-none focus:ring-2 focus:ring-rose-500/20 cursor-pointer shadow-sm transition-colors ${theme === 'light' ? 'bg-white border border-gray-200 hover:border-gray-300' : 'bg-slate-800 border border-white/10 text-white hover:border-white/20'}`}
+                  >
+                      {[10, 20, 30, 50, 100, 500, 1000].map(size => (
+                          <option key={size} value={size}>{size}</option>
+                      ))}
+                  </select>
+              </div>
+              <div className={`flex items-center gap-2 p-1 rounded-xl border ${theme === 'light' ? 'bg-gray-50 border-gray-100' : 'bg-white/5 border-white/10'}`}>
+                  <button 
+                      onClick={() => setCurrentPage(p => Math.max(1, p - 1))} 
+                      disabled={currentPage === 1} 
+                      className={`p-2 rounded-lg transition disabled:opacity-30 disabled:cursor-not-allowed ${theme === 'light' ? 'hover:bg-white hover:shadow-sm text-gray-600' : 'hover:bg-white/10 text-gray-300'}`}
+                  >
+                      <ChevronLeft size={16} />
+                  </button>
+                  <span className={`text-xs font-black font-mono px-3 min-w-[100px] text-center ${theme === 'light' ? 'text-gray-600' : 'text-gray-200'}`}>
+                      {currentPage} / {totalPages}
+                  </span>
+                  <button 
+                      onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} 
+                      disabled={currentPage === totalPages} 
+                      className={`p-2 rounded-lg transition disabled:opacity-30 disabled:cursor-not-allowed ${theme === 'light' ? 'hover:bg-white hover:shadow-sm text-gray-600' : 'hover:bg-white/10 text-gray-300'}`}
+                  >
+                      <ChevronRight size={16} />
+                  </button>
+              </div>
+              <div className="flex items-center gap-2">
+                  <span className={`text-xs font-bold ${theme === 'light' ? 'text-gray-400' : 'text-gray-500'}`}>跳转至</span>
+                  <input 
+                      type="number" 
+                      min={1} 
+                      max={totalPages}
+                      value={jumpPage}
+                      onChange={(e) => setJumpPage(e.target.value)}
+                      onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                              const page = parseInt(jumpPage);
+                              if (page >= 1 && page <= totalPages) {
+                                  setCurrentPage(page);
+                                  setJumpPage('');
+                              }
+                          }
+                      }}
+                      className={`w-16 rounded-xl text-xs font-bold py-2 px-2 text-center outline-none focus:ring-2 focus:ring-rose-500/20 shadow-sm ${theme === 'light' ? 'bg-white border border-gray-200' : 'bg-slate-800 border border-white/10 text-white'}`}
+                  />
+                  <button 
+                      onClick={() => {
+                          const page = parseInt(jumpPage);
+                          if (page >= 1 && page <= totalPages) {
+                              setCurrentPage(page);
+                              setJumpPage('');
+                          }
+                      }}
+                      className={`px-4 py-2 rounded-xl text-xs font-bold transition shadow-lg ${theme === 'light' ? 'bg-slate-800 text-white hover:bg-black shadow-gray-200' : 'bg-white/10 text-white hover:bg-white/20 shadow-black/50'}`}
+                  >
+                      Go
+                  </button>
+              </div>
+          </div>
+      )}
       </div>
       {/* Import Error Modal */}
       <Modal
@@ -1272,7 +1262,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
 
           {importResults && (importResults as ImportResults).duplicateFiles.length > 0 && (
             <div className="mt-4">
-              <h4 className="font-semibold mb-2 text-sm uppercase tracking-wider opacity-70">重复文件 (已跳过)</h4>
+              <h4 className="font-semibold mb-2 text-sm uppercase tracking-wider opacity-70">重复文件 (已导入)</h4>
               <div className={`rounded-lg p-3 text-sm font-mono overflow-x-auto max-h-32 overflow-y-auto custom-scrollbar ${theme === 'light' ? 'bg-yellow-50 text-yellow-800' : 'bg-yellow-900/20 text-yellow-200'}`}>
                 <ul className="list-disc list-inside space-y-1">
                   {(importResults as ImportResults).duplicateFiles.map((name, idx) => (

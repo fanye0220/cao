@@ -1,17 +1,35 @@
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { Character, Message } from "../types";
 
+const API_KEY_STORAGE_KEY = 'glass_tavern_gemini_api_key';
+
+// Get API key: localStorage first, then env fallback
+const getApiKey = (): string | null => {
+  return localStorage.getItem(API_KEY_STORAGE_KEY) || process.env.API_KEY || null;
+};
+
+// Save user-provided API key to localStorage
+export const saveApiKey = (key: string): void => {
+  localStorage.setItem(API_KEY_STORAGE_KEY, key.trim());
+};
+
+// Remove API key
+export const clearApiKey = (): void => {
+  localStorage.removeItem(API_KEY_STORAGE_KEY);
+};
+
 // Helper to check if API key exists
 export const hasApiKey = (): boolean => {
-  return !!process.env.API_KEY;
+  return !!getApiKey();
 };
 
 // Initialize Gemini Client
 const getClient = () => {
-  if (!process.env.API_KEY) {
-    throw new Error("API Key is missing. Please ensure process.env.API_KEY is set.");
+  const key = getApiKey();
+  if (!key) {
+    throw new Error("API Key is missing. Please set your Gemini API key in the settings.");
   }
-  return new GoogleGenAI({ apiKey: process.env.API_KEY });
+  return new GoogleGenAI({ apiKey: key });
 };
 
 /**
