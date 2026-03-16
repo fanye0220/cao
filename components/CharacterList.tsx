@@ -1156,7 +1156,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
       
       {/* Unified Pagination */}
       {(activeFilter.type === 'duplicate' ? (groupedCharacters && groupedCharacters.length > 0) : filteredCharacters.length > 0) && (
-          <div className={`flex flex-wrap items-center justify-between gap-4 px-4 py-3 z-10 sticky bottom-0 shrink-0 -mx-2 border-t ${theme === 'light' ? 'bg-white/20 backdrop-blur-2xl border-white/50' : 'bg-black/15 backdrop-blur-2xl border-white/[0.07]'}`}>
+          <div className={`flex flex-wrap items-center justify-between gap-4 p-4 rounded-2xl shadow-sm z-10 sticky bottom-0 shrink-0 border-t ${theme === 'light' ? 'bg-white/[0.38] backdrop-blur-md border-gray-100/60 shadow-[0_-4px_20px_rgba(0,0,0,0.06)]' : 'bg-slate-900/[0.38] backdrop-blur-md border-white/[0.06] shadow-[0_-4px_20px_rgba(0,0,0,0.3)]'}`}>
               <div className="flex items-center gap-3">
                   <span className={`text-xs font-bold ${theme === 'light' ? 'text-gray-500' : 'text-gray-400'}`}>每页显示</span>
                   <select 
