@@ -10,7 +10,6 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@google/genai": "^1.41.0",
     "idb-keyval": "^6.2.2",
     "jszip": "3.10.1",
     "lucide-react": "^0.564.0",

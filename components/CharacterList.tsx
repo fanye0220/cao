@@ -1534,7 +1534,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
                                 }}
                                 className="flex-1"
                              >
-                                <Pencil size={14} className="mr-2" /> 编辑 / 聊天
+                                <Pencil size={14} className="mr-2" /> 查看 / 编辑
                              </Button>
                              <Button 
                                 variant="secondary"

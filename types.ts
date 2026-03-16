@@ -1,4 +1,3 @@
-
 export interface QrItem {
   id: number;
   label: string;
@@ -30,7 +29,7 @@ export interface Character {
   description: string;
   personality: string;
   firstMessage: string;
-  alternate_greetings?: string[]; // Added: Alternate greetings support
+  alternate_greetings?: string[];
   avatarUrl: string;
   scenario?: string;
   mes_example?: string;
@@ -41,26 +40,19 @@ export interface Character {
   character_version?: string;
   extensions?: any;
   character_book?: CharacterBook;
-  tags?: string[]; // Added: Tags support
+  tags?: string[];
   qrList?: QrItem[];
   originalFilename?: string;
   sourceUrl?: string;
   cardUrl?: string;
   importDate?: number;
   fileLastModified?: number;
-  extra_qr_data?: any; // Store full QR JSON object for export
+  extra_qr_data?: any;
   qrFileName?: string;
   isFavorite?: boolean;
   folder?: string;
   importFormat?: 'png' | 'json' | 'unknown';
   updatedAt?: number;
-}
-
-export interface Message {
-  id: string;
-  role: 'user' | 'model';
-  content: string;
-  timestamp: number;
 }
 
 export type ViewMode = 'list' | 'edit';
