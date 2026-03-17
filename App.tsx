@@ -5,19 +5,11 @@ import CharacterForm from './components/CharacterForm';
 import { DEFAULT_CHARACTERS } from './constants';
 import { Moon, Sun } from 'lucide-react';
 import { loadImage, deleteImage, saveImage } from './services/imageService';
+import { get, set } from 'idb-keyval';
 
 function App() {
-  // Load characters from localStorage or use defaults
-  const [characters, setCharacters] = useState<Character[]>(() => {
-    try {
-      const saved = localStorage.getItem('glass_tavern_characters_v1');
-      const parsed = saved ? JSON.parse(saved) : DEFAULT_CHARACTERS;
-      return Array.isArray(parsed) ? parsed : DEFAULT_CHARACTERS;
-    } catch (e) {
-      console.error("Failed to parse characters from localStorage", e);
-      return DEFAULT_CHARACTERS;
-    }
-  });
+  const [characters, setCharacters] = useState<Character[]>([]);
+  const [isLoaded, setIsLoaded] = useState(false);
 
   const [view, setView] = useState<ViewMode>('list');
   const [selectedCharacterId, setSelectedCharacterId] = useState<string | null>(null);
@@ -37,15 +29,67 @@ function App() {
     }
   });
 
-  // Persist characters
+  // Load characters from IDB or fallback to localStorage
   useEffect(() => {
-    try {
-      localStorage.setItem('glass_tavern_characters_v1', JSON.stringify(characters));
-    } catch (e) {
-      console.error("Failed to save characters to localStorage (Quota Exceeded?)", e);
-      // Optional: Show a toast to the user?
-    }
-  }, [characters]);
+    const loadData = async () => {
+      try {
+        let parsed = await get('glass_tavern_characters_v1');
+        if (!parsed) {
+          // Fallback to localStorage for migration
+          const saved = localStorage.getItem('glass_tavern_characters_v1');
+          parsed = saved ? JSON.parse(saved) : DEFAULT_CHARACTERS;
+          if (!Array.isArray(parsed)) parsed = DEFAULT_CHARACTERS;
+          await set('glass_tavern_characters_v1', parsed);
+        }
+        
+        // Load images from IndexedDB to fix blob URL expiration
+        const updatedCharacters = await Promise.all(parsed.map(async (char: Character) => {
+          try {
+            const blob = await loadImage(char.id);
+            if (blob) {
+              return { ...char, avatarUrl: URL.createObjectURL(blob) };
+            }
+          } catch (e) {
+            console.error(`Failed to load image for char ${char.id}`, e);
+          }
+          return char;
+        }));
+        
+        setCharacters(updatedCharacters);
+      } catch (e) {
+        console.error("Failed to load characters", e);
+        setCharacters(DEFAULT_CHARACTERS);
+      } finally {
+        setIsLoaded(true);
+      }
+    };
+    
+    loadData();
+  }, []);
+
+  // Persist characters to IDB
+  useEffect(() => {
+    if (!isLoaded) return; // Don't overwrite with initial empty array
+    
+    const saveData = async () => {
+      try {
+        // Strip out blob URLs before saving to avoid storing massive strings or invalid URLs
+        const charsToSave = characters.map(c => {
+            if (c.avatarUrl.startsWith('blob:')) {
+                return { ...c, avatarUrl: '' }; // Will be restored on load
+            }
+            return c;
+        });
+        await set('glass_tavern_characters_v1', charsToSave);
+        // Clean up localStorage to free space
+        localStorage.removeItem('glass_tavern_characters_v1');
+      } catch (e) {
+        console.error("Failed to save characters to IDB", e);
+      }
+    };
+    
+    saveData();
+  }, [characters, isLoaded]);
 
   // Persist folders
   useEffect(() => {
@@ -55,48 +99,6 @@ function App() {
       console.error("Failed to save folders to localStorage", e);
     }
   }, [folders]);
-
-  // Load images from IndexedDB on mount to fix blob URL expiration
-  useEffect(() => {
-    const loadImages = async () => {
-      if (!Array.isArray(characters)) return;
-      
-      const updatedCharacters = await Promise.all(characters.map(async (char) => {
-        // If it's an external URL (http/https), we don't need to load from IDB
-        // unless we want to cache it, but for now let's assume external URLs are fine.
-        // However, imported chars use blob URLs which expire.
-        
-        // Try to load from IDB first
-        try {
-          const blob = await loadImage(char.id);
-          if (blob) {
-            return { ...char, avatarUrl: URL.createObjectURL(blob) };
-          }
-        } catch (e) {
-          console.error(`Failed to load image for char ${char.id}`, e);
-        }
-        
-        // If not in IDB, and it's a blob URL, it's definitely broken (expired).
-        // We should probably show a placeholder or keep it (it will show broken image).
-        // Let's keep it for now, but maybe we could set a flag.
-        return char;
-      }));
-      
-      setCharacters(prev => {
-        const urlMap = new Map(updatedCharacters.map(c => [c.id, c.avatarUrl]));
-        return prev.map(c => {
-           if (urlMap.has(c.id)) {
-               return { ...c, avatarUrl: urlMap.get(c.id)! };
-           }
-           return c;
-        });
-      });
-    };
-    
-    if (characters.length > 0) {
-      loadImages().catch(err => console.error("Failed to load images from IDB:", err));
-    }
-  }, []);
 
   // Handlers
   const handleSaveCharacter = async (char: Character) => {
@@ -193,6 +195,16 @@ function App() {
     backgroundPosition: 'center',
     backgroundAttachment: 'fixed'
   };
+
+  if (!isLoaded) {
+    return (
+      <div className={`min-h-screen flex items-center justify-center transition-all duration-700 font-sans`} style={backgroundStyle}>
+        <div className={`text-xl ${theme === 'light' ? 'text-slate-600' : 'text-slate-300'} animate-pulse`}>
+          正在加载角色数据...
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`min-h-screen relative overflow-hidden transition-all duration-700 font-sans`} style={backgroundStyle}>
