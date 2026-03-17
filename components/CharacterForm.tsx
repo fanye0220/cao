@@ -85,9 +85,7 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
     if (file) {
       setFormData(prev => ({ 
           ...prev, 
-          avatarUrl: URL.createObjectURL(file),
-          originalFilename: file.name,
-          cardUrl: file.name // Auto-fill cardUrl with filename on upload
+          avatarUrl: URL.createObjectURL(file)
       }));
     }
   };

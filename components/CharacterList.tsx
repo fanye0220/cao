@@ -29,6 +29,7 @@ interface ImportResults {
   invalidFormatFiles: string[];
   duplicateFiles: string[];
   otherFailedFiles: string[];
+  qrFiles: string[];
 }
 
 const CharacterList: React.FC<CharacterListProps> = ({ 
@@ -371,10 +372,16 @@ const CharacterList: React.FC<CharacterListProps> = ({
         {/* Image Section (Top 65%) */}
         <div className="h-[65%] w-full relative overflow-hidden bg-gray-900">
              <img 
-                src={char.avatarUrl} 
+                src={char.avatarUrl || `https://picsum.photos/seed/${char.id}/400/400`} 
                 alt={char.name} 
                 className="w-full h-full object-cover object-top transition-transform duration-700 group-hover:scale-105"
                 loading="lazy" 
+                onError={(e) => {
+                    const target = e.target as HTMLImageElement;
+                    if (!target.src.includes('picsum.photos')) {
+                        target.src = `https://picsum.photos/seed/${char.id}/400/400`;
+                    }
+                }}
             />
             {/* Dark gradient overlay */}
             <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/80 to-transparent pointer-events-none" />
@@ -439,8 +446,10 @@ const CharacterList: React.FC<CharacterListProps> = ({
     const invalidFormatFiles: string[] = [];
     const duplicateFiles: string[] = [];
     const otherFailedFiles: string[] = [];
+    const qrFiles: string[] = [];
     const fileArray = Array.from(files) as File[];
     const validChars: Character[] = [];
+    const seenNamesInBatch = new Set<string>();
 
     for (let i = 0; i < fileArray.length; i++) {
       const file = fileArray[i];
@@ -465,21 +474,26 @@ const CharacterList: React.FC<CharacterListProps> = ({
             char = await parseCharacterJson(file);
         }
 
-        const isDuplicateName = characters.some(c => c.name === char.name);
-        if (isDuplicateName) {
+        const isDuplicateInApp = characters.some(c => c.name === char.name);
+        const isDuplicateInBatch = seenNamesInBatch.has(char.name);
+        
+        if (isDuplicateInApp || isDuplicateInBatch) {
             duplicateFiles.push(file.name);
-            if (files.length === 1) {
+            if (files.length === 1 && isDuplicateInApp) {
                 setWarning(`注意：检测到重复的角色 "${char.name}"，已导入`);
             }
         }
         
+        seenNamesInBatch.add(char.name);
         validChars.push(char);
         successCount++;
       } catch (err: any) {
         console.error(`Failed to import ${file.name}:`, err);
         failCount++;
         const msg = err.message || "";
-        if (msg.includes("不是有效的 PNG 文件") || msg.includes("未在此图片中找到角色数据") || msg.includes("Invalid JSON file") || msg.includes("无效的")) {
+        if (msg === "DETECTED_QR_FILE") {
+            qrFiles.push(file.name);
+        } else if (msg.includes("不是有效的 PNG 文件") || msg.includes("未在此图片中找到角色数据") || msg.includes("Invalid JSON file") || msg.includes("无效的")) {
             invalidFormatFiles.push(file.name);
         } else {
             otherFailedFiles.push(file.name);
@@ -497,7 +511,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
 
     setImportingCount(0);
     if (failCount > 0) {
-        setImportResults({ success: successCount, failed: failCount, invalidFormatFiles, duplicateFiles, otherFailedFiles });
+        setImportResults({ success: successCount, failed: failCount, invalidFormatFiles, duplicateFiles, otherFailedFiles, qrFiles });
         setImportErrorModalOpen(true);
     } else if (files.length > 1) {
         // Optional: show success toast for bulk import
@@ -1247,6 +1261,20 @@ const CharacterList: React.FC<CharacterListProps> = ({
              )}
           </div>
           
+          {importResults && (importResults as ImportResults).qrFiles.length > 0 && (
+            <div className="mt-4">
+              <h4 className="font-semibold mb-2 text-sm uppercase tracking-wider opacity-70">检测到 QR 配置文件</h4>
+              <p className="text-xs mb-2 opacity-60">这些文件应在角色详情页中导入，而不是在此处导入：</p>
+              <div className={`rounded-lg p-3 text-sm font-mono overflow-x-auto max-h-32 overflow-y-auto custom-scrollbar ${theme === 'light' ? 'bg-blue-50 text-blue-800' : 'bg-blue-900/20 text-blue-200'}`}>
+                <ul className="list-disc list-inside space-y-1">
+                  {(importResults as ImportResults).qrFiles.map((msg, idx) => (
+                    <li key={idx} className="break-all">{msg}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+
           {importResults && (importResults as ImportResults).invalidFormatFiles.length > 0 && (
             <div className="mt-4">
               <h4 className="font-semibold mb-2 text-sm uppercase tracking-wider opacity-70">非酒馆卡 (格式无效)</h4>
@@ -1275,7 +1303,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
 
           {importResults && (importResults as ImportResults).otherFailedFiles.length > 0 && (
             <div className="mt-4">
-              <h4 className="font-semibold mb-2 text-sm uppercase tracking-wider opacity-70">其他错误</h4>
+              <h4 className="font-semibold mb-2 text-sm uppercase tracking-wider opacity-70">其他未知错误</h4>
               <div className={`rounded-lg p-3 text-sm font-mono overflow-x-auto max-h-32 overflow-y-auto custom-scrollbar ${theme === 'light' ? 'bg-red-50 text-red-800' : 'bg-red-900/20 text-red-200'}`}>
                 <ul className="list-disc list-inside space-y-1">
                   {(importResults as ImportResults).otherFailedFiles.map((msg, idx) => (

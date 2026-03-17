@@ -372,6 +372,11 @@ export const parseCharacterJson = async (file: File): Promise<Character> => {
         throw new Error("Invalid JSON file");
     }
 
+    // Detect if this is a QR configuration file instead of a character card
+    if (data && (Array.isArray(data.qrList) || (data.version && data.qrList))) {
+        throw new Error("DETECTED_QR_FILE");
+    }
+
     // Handle V2 and V3 Spec
     let finalData = data;
     if ((data.spec === 'chara_card_v2' || data.spec === 'chara_card_v3') && data.data) {
