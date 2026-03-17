@@ -1122,7 +1122,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
       {warning && <div className="mb-4 mx-2 p-3 bg-yellow-500/20 border border-yellow-500/40 rounded-xl flex items-center gap-3 text-yellow-100 backdrop-blur-md text-sm"><AlertTriangle className="text-yellow-400" size={16} />{warning}</div>}
 
         {/* Grid */}
-      <div className="flex-1 overflow-y-auto min-h-0 pb-20 custom-scrollbar relative">
+      <div className="flex-1 overflow-y-auto min-h-0 pb-32 custom-scrollbar relative">
         {activeFilter.type === 'duplicate' && groupedCharacters ? (
             <div className="px-2 space-y-8">
                 {displayGroups.map(([name, chars]) => (
@@ -1156,40 +1156,40 @@ const CharacterList: React.FC<CharacterListProps> = ({
       
       {/* Unified Pagination */}
       {(activeFilter.type === 'duplicate' ? (groupedCharacters && groupedCharacters.length > 0) : filteredCharacters.length > 0) && (
-          <div className={`flex flex-wrap items-center justify-between gap-4 p-4 rounded-2xl shadow-sm z-10 sticky bottom-0 shrink-0 border-t ${theme === 'light' ? 'bg-white/[0.38] backdrop-blur-md border-gray-100/60 shadow-[0_-4px_20px_rgba(0,0,0,0.06)]' : 'bg-slate-900/[0.38] backdrop-blur-md border-white/[0.06] shadow-[0_-4px_20px_rgba(0,0,0,0.3)]'}`}>
+          <div className={`absolute bottom-4 left-4 right-4 flex flex-wrap items-center justify-between gap-4 p-4 rounded-2xl shadow-lg z-20 border ${theme === 'light' ? 'bg-white/[0.38] border-white/40' : 'bg-black/[0.38] border-white/10'}`}>
               <div className="flex items-center gap-3">
-                  <span className={`text-xs font-bold ${theme === 'light' ? 'text-gray-500' : 'text-gray-400'}`}>每页显示</span>
+                  <span className={`text-xs font-bold ${theme === 'light' ? 'text-slate-700' : 'text-gray-300'}`}>每页显示</span>
                   <select 
                       value={itemsPerPage}
                       onChange={(e) => setItemsPerPage(Number(e.target.value))}
-                      className={`rounded-xl text-xs font-bold py-2 px-3 outline-none focus:ring-2 focus:ring-rose-500/20 cursor-pointer shadow-sm transition-colors ${theme === 'light' ? 'bg-white border border-gray-200 hover:border-gray-300' : 'bg-slate-800 border border-white/10 text-white hover:border-white/20'}`}
+                      className={`rounded-xl text-xs font-bold py-2 px-3 outline-none focus:ring-2 focus:ring-rose-500/20 cursor-pointer shadow-sm transition-colors ${theme === 'light' ? 'bg-white/50 border border-white/50 hover:bg-white/70 text-slate-800' : 'bg-black/50 border border-white/10 text-white hover:bg-black/70'}`}
                   >
                       {[10, 20, 30, 50, 100, 500, 1000].map(size => (
-                          <option key={size} value={size}>{size}</option>
+                          <option key={size} value={size} className="bg-white text-black dark:bg-slate-800 dark:text-white">{size}</option>
                       ))}
                   </select>
               </div>
-              <div className={`flex items-center gap-2 p-1 rounded-xl border ${theme === 'light' ? 'bg-gray-50 border-gray-100' : 'bg-white/5 border-white/10'}`}>
+              <div className={`flex items-center gap-2 p-1 rounded-xl border ${theme === 'light' ? 'bg-white/40 border-white/50' : 'bg-black/40 border-white/10'}`}>
                   <button 
                       onClick={() => setCurrentPage(p => Math.max(1, p - 1))} 
                       disabled={currentPage === 1} 
-                      className={`p-2 rounded-lg transition disabled:opacity-30 disabled:cursor-not-allowed ${theme === 'light' ? 'hover:bg-white hover:shadow-sm text-gray-600' : 'hover:bg-white/10 text-gray-300'}`}
+                      className={`p-2 rounded-lg transition disabled:opacity-30 disabled:cursor-not-allowed ${theme === 'light' ? 'hover:bg-white/60 hover:shadow-sm text-slate-700' : 'hover:bg-white/20 text-gray-300'}`}
                   >
                       <ChevronLeft size={16} />
                   </button>
-                  <span className={`text-xs font-black font-mono px-3 min-w-[100px] text-center ${theme === 'light' ? 'text-gray-600' : 'text-gray-200'}`}>
+                  <span className={`text-xs font-black font-mono px-3 min-w-[100px] text-center ${theme === 'light' ? 'text-slate-800' : 'text-gray-200'}`}>
                       {currentPage} / {totalPages}
                   </span>
                   <button 
                       onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} 
                       disabled={currentPage === totalPages} 
-                      className={`p-2 rounded-lg transition disabled:opacity-30 disabled:cursor-not-allowed ${theme === 'light' ? 'hover:bg-white hover:shadow-sm text-gray-600' : 'hover:bg-white/10 text-gray-300'}`}
+                      className={`p-2 rounded-lg transition disabled:opacity-30 disabled:cursor-not-allowed ${theme === 'light' ? 'hover:bg-white/60 hover:shadow-sm text-slate-700' : 'hover:bg-white/20 text-gray-300'}`}
                   >
                       <ChevronRight size={16} />
                   </button>
               </div>
               <div className="flex items-center gap-2">
-                  <span className={`text-xs font-bold ${theme === 'light' ? 'text-gray-400' : 'text-gray-500'}`}>跳转至</span>
+                  <span className={`text-xs font-bold ${theme === 'light' ? 'text-slate-700' : 'text-gray-300'}`}>跳转至</span>
                   <input 
                       type="number" 
                       min={1} 
@@ -1205,7 +1205,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
                               }
                           }
                       }}
-                      className={`w-16 rounded-xl text-xs font-bold py-2 px-2 text-center outline-none focus:ring-2 focus:ring-rose-500/20 shadow-sm ${theme === 'light' ? 'bg-white border border-gray-200' : 'bg-slate-800 border border-white/10 text-white'}`}
+                      className={`w-16 rounded-xl text-xs font-bold py-2 px-2 text-center outline-none focus:ring-2 focus:ring-rose-500/20 shadow-sm ${theme === 'light' ? 'bg-white/50 border border-white/50 text-slate-800' : 'bg-black/50 border border-white/10 text-white'}`}
                   />
                   <button 
                       onClick={() => {
@@ -1215,7 +1215,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
                               setJumpPage('');
                           }
                       }}
-                      className={`px-4 py-2 rounded-xl text-xs font-bold transition shadow-lg ${theme === 'light' ? 'bg-slate-800 text-white hover:bg-black shadow-gray-200' : 'bg-white/10 text-white hover:bg-white/20 shadow-black/50'}`}
+                      className={`px-4 py-2 rounded-xl text-xs font-bold transition shadow-lg ${theme === 'light' ? 'bg-white/60 text-slate-800 hover:bg-white/80 border border-white/50' : 'bg-white/10 text-white hover:bg-white/20 border border-white/10'}`}
                   >
                       Go
                   </button>
@@ -1534,7 +1534,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
                                 }}
                                 className="flex-1"
                              >
-                                <Pencil size={14} className="mr-2" /> 查看 / 编辑
+                                <Pencil size={14} className="mr-2" /> 编辑
                              </Button>
                              <Button 
                                 variant="secondary"
