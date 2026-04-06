@@ -777,3 +777,45 @@ const encodeBase64Utf8 = (str: string): string => {
   const binString = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
   return btoa(binString);
 };
+
+export const parseWorldInfoFile = async (file: File): Promise<any> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const content = e.target?.result as string;
+        const parsed = JSON.parse(content);
+        
+        let book = parsed;
+        if (parsed.entries) {
+            book = parsed;
+        } else if (parsed.character_book && parsed.character_book.entries) {
+            book = parsed.character_book;
+        } else if (Array.isArray(parsed)) {
+            book = { entries: parsed };
+        } else {
+            throw new Error("Invalid World Info format. Expected 'entries' array.");
+        }
+        
+        resolve(book);
+      } catch (err) {
+        reject(new Error("Failed to parse World Info JSON"));
+      }
+    };
+    reader.onerror = () => reject(new Error("Failed to read file"));
+    reader.readAsText(file);
+  });
+};
+
+export const exportWorldInfoData = (book: any, filename: string = "world_info.json") => {
+  const jsonStr = JSON.stringify(book, null, 2);
+  const blob = new Blob([jsonStr], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};

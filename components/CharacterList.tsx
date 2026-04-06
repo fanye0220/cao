@@ -105,7 +105,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [lastSelectedId, setLastSelectedId] = useState<string | null>(null);
   const [exportMenuCharId, setExportMenuCharId] = useState<string | null>(null);
-  const [sortOption, setSortOption] = useState<'updated-desc' | 'date-desc' | 'date-asc' | 'name-asc' | 'name-desc'>('updated-desc');
+  const [sortOption, setSortOption] = useState<'updated-desc' | 'date-desc' | 'date-asc' | 'name-asc' | 'name-desc'>('name-asc');
   const [compareModalOpen, setCompareModalOpen] = useState(false);
   const [viewCharacter, setViewCharacter] = useState<Character | null>(null);
   

@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { Character, Theme } from '../types';
 import GlassCard from './ui/GlassCard';
 import Button from './ui/Button';
-import { parseQrFile, exportCharacterData, exportQrData } from '../services/cardImportService';
+import { parseQrFile, exportCharacterData, exportQrData, parseWorldInfoFile, exportWorldInfoData } from '../services/cardImportService';
 import { X, User, MessageSquare, BookOpen, Upload, ExternalLink, FileJson, Book, Plus, Trash2, Tag, Save, RotateCcw, FileText, QrCode, Layers, Image as ImageIcon, Download, Pen, Eye, Maximize, Check, Info, UserPen, Smile, Map, MessageSquareQuote, Terminal, ScrollText } from 'lucide-react';
 
 interface CharacterFormProps {
@@ -124,6 +124,42 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
               qrList: [],
               extra_qr_data: {},
               qrFileName: ''
+          }));
+      }
+  };
+
+  const worldInfoInputRef = useRef<HTMLInputElement>(null);
+
+  const handleWorldInfoImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const book = await parseWorldInfoFile(file);
+      setFormData(prev => ({ 
+          ...prev, 
+          character_book: book
+      }));
+      alert(`成功导入世界书，包含 ${book.entries?.length || 0} 个条目!`);
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      if (worldInfoInputRef.current) worldInfoInputRef.current.value = '';
+    }
+  };
+
+  const handleWorldInfoExport = () => {
+      if (!formData.character_book || !formData.character_book.entries || formData.character_book.entries.length === 0) {
+          alert("没有可导出的世界书数据");
+          return;
+      }
+      exportWorldInfoData(formData.character_book, formData.character_book.name ? `${formData.character_book.name}.json` : 'world_info.json');
+  };
+
+  const handleClearWorldInfo = () => {
+      if (confirm("确定要清除当前的世界书配置吗？")) {
+          setFormData(prev => ({
+              ...prev,
+              character_book: undefined
           }));
       }
   };
@@ -251,9 +287,9 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
           originalFilename: formData.originalFilename,
           sourceUrl: formData.sourceUrl || '',
           cardUrl: formData.cardUrl || '',
-          updatedAt: changed ? now : (initialData?.updatedAt || now),
+          updatedAt: changed ? now : initialData?.updatedAt,
           importDate: initialData?.importDate || now,
-          fileLastModified: changed ? now : (initialData?.fileLastModified || now)
+          fileLastModified: changed ? now : initialData?.fileLastModified
       };
   };
 
@@ -644,18 +680,6 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
                                 <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                     <button 
                                         type="button" 
-                                        onClick={() => {
-                                            if(confirm('Use this greeting as the main First Message?')) {
-                                                setFormData(prev => ({ ...prev, firstMessage: msg }));
-                                            }
-                                        }}
-                                        className="p-1.5 text-blue-400 hover:text-blue-500 transition-colors rounded-md hover:bg-blue-500/10"
-                                        title="Use as First Message"
-                                    >
-                                        <RotateCcw size={14}/>
-                                    </button>
-                                    <button 
-                                        type="button" 
                                         onClick={() => removeAltGreeting(idx)}
                                         className="p-1.5 text-gray-400 hover:text-red-500 transition-colors rounded-md hover:bg-red-500/10"
                                         title="Remove"
@@ -756,18 +780,80 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
                   <label className={`flex items-center gap-2 ${labelColor}`}>
                       <Book size={14}/> 世界书 (WORLD INFO)
                   </label>
-                  <button 
-                      onClick={() => { setShowWorldInfoModal(true); setViewingWorldInfoIndex(formData.character_book?.entries?.length ? 0 : -1); }}
-                      className={`text-xs px-3 py-1.5 rounded-lg font-bold flex items-center gap-1 transition-colors ${theme === 'light' ? 'bg-blue-50 text-blue-600 hover:bg-blue-100' : 'bg-blue-500/20 text-blue-300 hover:bg-blue-500/30'}`}
-                  >
-                      <Maximize size={12}/> 全屏查看 / 编辑
-                  </button>
+                  <input type="file" accept=".json" className="hidden" ref={worldInfoInputRef} onChange={handleWorldInfoImport} />
               </div>
-              <div className={`w-full rounded-2xl p-6 text-sm flex items-center justify-between ${theme === 'light' ? 'bg-slate-50' : 'bg-white/5'}`}>
-                  <span className={`font-medium ${theme === 'light' ? 'text-slate-600' : 'text-gray-300'}`}>
-                      当前包含 {formData.character_book?.entries?.length || 0} 个世界书条目
-                  </span>
-                  <BookOpen size={20} className="opacity-20" />
+
+              <div className={`rounded-2xl border-2 border-dashed transition-all duration-300 ${
+                  formData.character_book && formData.character_book.entries && formData.character_book.entries.length > 0 
+                    ? (theme === 'light' ? 'border-slate-300 bg-slate-50/50' : 'border-white/20 bg-white/5')
+                    : (theme === 'light' ? 'border-slate-200 bg-slate-50/30 hover:bg-slate-50/50' : 'border-white/10 bg-white/5 hover:bg-white/10')
+              }`}>
+                  {formData.character_book && formData.character_book.entries && formData.character_book.entries.length > 0 ? (
+                      <div className="p-6">
+                          <div className="flex justify-between items-center mb-4">
+                              <div className="flex items-center gap-2">
+                                  <div className="w-2.5 h-2.5 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]"></div>
+                                  <span className={`font-bold text-sm ${theme === 'light' ? 'text-slate-700' : 'text-gray-200'}`}>
+                                      已绑定世界书
+                                  </span>
+                              </div>
+                              <div className="flex gap-2">
+                                  <button 
+                                      onClick={() => { setShowWorldInfoModal(true); setViewingWorldInfoIndex(formData.character_book?.entries?.length ? 0 : -1); }}
+                                      className={`p-1.5 rounded-lg transition-colors ${theme === 'light' ? 'text-blue-500 hover:bg-blue-50' : 'text-blue-400 hover:bg-blue-500/10'}`}
+                                      title="全屏查看 / 编辑"
+                                  >
+                                      <Maximize size={16} />
+                                  </button>
+                                  <button 
+                                      onClick={handleClearWorldInfo}
+                                      className="p-1.5 rounded-lg text-slate-400 hover:bg-red-500/10 hover:text-red-500 transition-colors"
+                                      title="清除配置"
+                                  >
+                                      <Trash2 size={16} />
+                                  </button>
+                              </div>
+                          </div>
+
+                          <div className={`w-full rounded-xl px-4 py-3 mb-4 text-sm flex items-center justify-between ${theme === 'light' ? 'bg-white border border-slate-200 text-slate-600' : 'bg-black/20 border border-white/5 text-gray-300'}`}>
+                              <span className="truncate flex-1 font-medium">{formData.character_book.name || '未命名世界书'}</span>
+                              <span className="opacity-50 ml-2">{formData.character_book.entries.length} 个条目</span>
+                          </div>
+
+                          <button 
+                              onClick={handleWorldInfoExport}
+                              className={`w-full py-3 rounded-xl font-bold text-white transition-colors flex items-center justify-center gap-2 shadow-lg ${theme === 'light' ? 'bg-slate-800 hover:bg-slate-700 shadow-slate-800/20' : 'bg-white/10 hover:bg-white/20 shadow-white/5 border border-white/10'}`}
+                          >
+                              <Download size={18} />
+                              下载 JSON
+                          </button>
+                      </div>
+                  ) : (
+                      <div className="p-8 flex flex-col items-center justify-center gap-4 text-center">
+                          <div className={`p-4 rounded-full mb-2 ${theme === 'light' ? 'bg-slate-100 text-slate-500' : 'bg-white/10 text-gray-400'}`}>
+                              <BookOpen size={32} strokeWidth={1.5} />
+                          </div>
+                          <div className={`text-sm font-medium ${theme === 'light' ? 'text-slate-500' : 'text-gray-400'}`}>
+                              未绑定世界书
+                          </div>
+                          <div className="flex gap-3">
+                              <button 
+                                  onClick={() => worldInfoInputRef.current?.click()}
+                                  className={`px-6 py-2.5 rounded-xl font-bold text-white transition-colors flex items-center gap-2 shadow-lg ${theme === 'light' ? 'bg-slate-800 hover:bg-slate-700 shadow-slate-800/20' : 'bg-white/10 hover:bg-white/20 shadow-white/5 border border-white/10'}`}
+                              >
+                                  <FileJson size={18} />
+                                  导入 JSON
+                              </button>
+                              <button 
+                                  onClick={() => { setShowWorldInfoModal(true); setViewingWorldInfoIndex(-1); }}
+                                  className={`px-6 py-2.5 rounded-xl font-bold transition-colors flex items-center gap-2 ${theme === 'light' ? 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50' : 'bg-black/20 border border-white/10 text-gray-300 hover:bg-white/5'}`}
+                              >
+                                  <Plus size={18} />
+                                  新建
+                              </button>
+                          </div>
+                      </div>
+                  )}
               </div>
           </GlassCard>
 
@@ -975,11 +1061,26 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
                    {/* Header */}
                    <div className={`px-6 py-4 border-b flex items-center justify-between shrink-0
                         ${theme === 'light' ? 'bg-white/50 border-slate-200/50' : 'bg-white/5 border-white/10'}`}>
-                       <div className="flex items-center gap-4">
+                       <div className="flex items-center gap-4 flex-1">
                            <span className={`font-black text-lg flex items-center gap-2 ${theme === 'light' ? 'text-slate-800' : 'text-white'}`}>
                                <BookOpen size={20} className="text-indigo-500" />
-                               世界书 (World Info)
+                               世界书
                            </span>
+                           <input 
+                               type="text"
+                               value={formData.character_book?.name || ''}
+                               onChange={(e) => {
+                                   setFormData(prev => ({
+                                       ...prev,
+                                       character_book: {
+                                           ...(prev.character_book || { entries: [] }),
+                                           name: e.target.value
+                                       }
+                                   }));
+                               }}
+                               placeholder="世界书名称..."
+                               className={`ml-4 px-3 py-1.5 rounded-lg text-sm outline-none transition-all w-64 ${theme === 'light' ? 'bg-white border border-slate-200 focus:border-indigo-400' : 'bg-black/20 border border-white/10 focus:border-indigo-500 text-white'}`}
+                           />
                        </div>
                        <div className="flex items-center gap-3">
                            {isEditingWorldInfo && viewingWorldInfoIndex !== -1 ? (
