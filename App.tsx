@@ -11,11 +11,53 @@ function App() {
   const [characters, setCharacters] = useState<Character[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  const [view, setView] = useState<ViewMode>('list');
-  const [selectedCharacterId, setSelectedCharacterId] = useState<string | null>(null);
+  const [view, setView] = useState<ViewMode>(() => {
+    try {
+      const saved = localStorage.getItem('glass_tavern_view');
+      return (saved as ViewMode) || 'list';
+    } catch {
+      return 'list';
+    }
+  });
+  const [selectedCharacterId, setSelectedCharacterId] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('glass_tavern_selected_char') || null;
+    } catch {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('glass_tavern_view', view);
+      if (selectedCharacterId) {
+        localStorage.setItem('glass_tavern_selected_char', selectedCharacterId);
+      } else {
+        localStorage.removeItem('glass_tavern_selected_char');
+      }
+    } catch (e) {
+      console.error("Failed to save view state", e);
+    }
+  }, [view, selectedCharacterId]);
   
-  // Theme state: default is 'dark'
-  const [theme, setTheme] = useState<Theme>('dark');
+  // Theme state: default is 'dark', load from localStorage if available
+  const [theme, setTheme] = useState<Theme>(() => {
+    try {
+      const savedTheme = localStorage.getItem('glass_tavern_theme');
+      return (savedTheme === 'light' || savedTheme === 'dark') ? savedTheme : 'dark';
+    } catch (e) {
+      return 'dark';
+    }
+  });
+
+  // Persist theme
+  useEffect(() => {
+    try {
+      localStorage.setItem('glass_tavern_theme', theme);
+    } catch (e) {
+      console.error("Failed to save theme to localStorage", e);
+    }
+  }, [theme]);
 
   // Folders state
   const [folders, setFolders] = useState<string[]>(() => {

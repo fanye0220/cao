@@ -53,16 +53,41 @@ const CharacterList: React.FC<CharacterListProps> = ({
   const [importResults, setImportResults] = useState<ImportResults | null>(null);
   
   // Sidebar State
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [isTagsExpanded, setIsTagsExpanded] = useState(true);
-  const [isCollectionsExpanded, setIsCollectionsExpanded] = useState(true);
-  const [activeFilter, setActiveFilter] = useState<{ type: 'all' | 'favorite' | 'tag' | 'duplicate' | 'collection', value?: string }>({ type: 'all' });
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('glass_tavern_sidebar_open') || 'true'); } catch { return true; }
+  });
+  const [isTagsExpanded, setIsTagsExpanded] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('glass_tavern_tags_expanded') || 'true'); } catch { return true; }
+  });
+  const [isCollectionsExpanded, setIsCollectionsExpanded] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('glass_tavern_collections_expanded') || 'true'); } catch { return true; }
+  });
+  const [activeFilter, setActiveFilter] = useState<{ type: 'all' | 'favorite' | 'tag' | 'duplicate' | 'collection', value?: string }>(() => {
+    try { return JSON.parse(localStorage.getItem('glass_tavern_active_filter') || '{"type":"all"}'); } catch { return { type: 'all' }; }
+  });
   const [searchQuery, setSearchQuery] = useState('');
 
   // Resizable Sidebar State
-  const [collectionsHeight, setCollectionsHeight] = useState(180);
-  const [tagsHeight, setTagsHeight] = useState(180);
+  const [collectionsHeight, setCollectionsHeight] = useState(() => {
+    try { return parseInt(localStorage.getItem('glass_tavern_collections_height') || '180', 10); } catch { return 180; }
+  });
+  const [tagsHeight, setTagsHeight] = useState(() => {
+    try { return parseInt(localStorage.getItem('glass_tavern_tags_height') || '180', 10); } catch { return 180; }
+  });
   const [resizingTarget, setResizingTarget] = useState<'collections' | 'tags' | null>(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('glass_tavern_sidebar_open', JSON.stringify(isSidebarOpen));
+      localStorage.setItem('glass_tavern_tags_expanded', JSON.stringify(isTagsExpanded));
+      localStorage.setItem('glass_tavern_collections_expanded', JSON.stringify(isCollectionsExpanded));
+      localStorage.setItem('glass_tavern_active_filter', JSON.stringify(activeFilter));
+      localStorage.setItem('glass_tavern_collections_height', collectionsHeight.toString());
+      localStorage.setItem('glass_tavern_tags_height', tagsHeight.toString());
+    } catch (e) {
+      console.error("Failed to save UI state", e);
+    }
+  }, [isSidebarOpen, isTagsExpanded, isCollectionsExpanded, activeFilter, collectionsHeight, tagsHeight]);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -105,7 +130,22 @@ const CharacterList: React.FC<CharacterListProps> = ({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [lastSelectedId, setLastSelectedId] = useState<string | null>(null);
   const [exportMenuCharId, setExportMenuCharId] = useState<string | null>(null);
-  const [sortOption, setSortOption] = useState<'updated-desc' | 'date-desc' | 'date-asc' | 'name-asc' | 'name-desc'>('name-asc');
+  const [sortOption, setSortOption] = useState<'updated-desc' | 'date-desc' | 'date-asc' | 'name-asc' | 'name-desc'>(() => {
+    try {
+      const saved = localStorage.getItem('glass_tavern_sort_option');
+      return (saved as any) || 'updated-desc';
+    } catch {
+      return 'updated-desc';
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('glass_tavern_sort_option', sortOption);
+    } catch (e) {
+      console.error("Failed to save sort option", e);
+    }
+  }, [sortOption]);
   const [compareModalOpen, setCompareModalOpen] = useState(false);
   const [viewCharacter, setViewCharacter] = useState<Character | null>(null);
   
@@ -234,13 +274,36 @@ const CharacterList: React.FC<CharacterListProps> = ({
   };
   
   // Pagination State
-  const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(20);
+  const [currentPage, setCurrentPage] = useState(() => {
+    try {
+      const saved = localStorage.getItem('glass_tavern_current_page');
+      return saved ? parseInt(saved, 10) : 1;
+    } catch {
+      return 1;
+    }
+  });
+  const [itemsPerPage, setItemsPerPage] = useState(() => {
+    try {
+      const saved = localStorage.getItem('glass_tavern_items_per_page');
+      return saved ? parseInt(saved, 10) : 20;
+    } catch {
+      return 20;
+    }
+  });
   const [jumpPage, setJumpPage] = useState('');
 
   useEffect(() => {
+    try {
+      localStorage.setItem('glass_tavern_current_page', currentPage.toString());
+      localStorage.setItem('glass_tavern_items_per_page', itemsPerPage.toString());
+    } catch (e) {
+      console.error("Failed to save pagination state", e);
+    }
+  }, [currentPage, itemsPerPage]);
+
+  useEffect(() => {
     setCurrentPage(1);
-  }, [characters.length, itemsPerPage, sortOption, activeFilter]);
+  }, [itemsPerPage, sortOption, activeFilter]);
 
   // Compute unique tags (excluding collections)
   const allTags = useMemo(() => {
