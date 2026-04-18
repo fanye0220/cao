@@ -2,8 +2,11 @@ import React, { useRef, useState, useMemo, useEffect } from 'react';
 import { Character, Theme } from '../types';
 import Button from './ui/Button';
 import Modal from './ui/Modal';
-import { Pencil, Trash2, Upload, AlertCircle, Download, FileText, AlertTriangle, CheckSquare, Square, Filter, ChevronLeft, ChevronRight, ChevronDown, FolderInput, Book, MessageSquare, MoreVertical, FileJson, Image as ImageIcon, Check, Heart, Star, List, Tag, Menu, X, Plus, Copy, Folder, FolderPlus, GitCompare, Maximize, Search, BookOpen, QrCode, Scale, ArrowLeft, ArrowRight, Zap } from 'lucide-react';
+import { Pencil, Trash2, Upload, AlertCircle, Download, FileText, AlertTriangle, CheckSquare, Square, Filter, ChevronLeft, ChevronRight, ChevronDown, FolderInput, Book, MessageSquare, MoreVertical, FileJson, Image as ImageIcon, Check, Heart, Star, List, Tag, Menu, X, Plus, Copy, Folder, FolderPlus, GitCompare, Maximize, Search, BookOpen, QrCode, Scale, ArrowLeft, ArrowRight, Zap, Sparkles, Dices, RefreshCw } from 'lucide-react';
 import { parseCharacterCard, parseCharacterJson, exportCharacterData, exportBulkCharacters } from '../services/cardImportService';
+import { ApiConfigModal } from './ApiConfigModal';
+import { recommendCharacters, autoTagCharacter, autoTagCharactersBatch } from '../services/aiService';
+import { TarotCardDraw } from './TarotCardDraw';
 
 // Removed invalid module augmentation. We will cast props if needed or ignore the error for now as it's just for directory upload.
 // If needed, we can use a custom input component or just ignore the TS error on the input element locally.
@@ -40,7 +43,11 @@ const CharacterList: React.FC<CharacterListProps> = ({
   onImport,
   onImportBatch,
   onUpdate,
-  theme
+  theme,
+  folders = [],
+  onCreateFolder,
+  onDeleteFolder,
+  onRenameFolder
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -151,22 +158,217 @@ const CharacterList: React.FC<CharacterListProps> = ({
   
   // Tag & Collection Management
   const [customTags, setCustomTags] = useState<string[]>([]); // "Card Tags"
-  const [collections, setCollections] = useState<string[]>(() => {
-      try {
-          const saved = localStorage.getItem('collections');
-          return saved ? JSON.parse(saved) : [];
-      } catch {
-          return [];
+  const [showTagFilterModal, setShowTagFilterModal] = useState(false);
+  const [tagFilterMode, setTagFilterMode] = useState<'view' | 'edit'>('view');
+
+  // AI Features State
+  const [showAIRecommendModal, setShowAIRecommendModal] = useState(false);
+  const [showAutoTagModal, setShowAutoTagModal] = useState(false);
+  const [showApiConfigModal, setShowApiConfigModal] = useState(false);
+  const [autoTagTab, setAutoTagTab] = useState<'untagged' | 'tagged'>('untagged');
+  const [autoTagBatchSize, setAutoTagBatchSize] = useState(10);
+  const [aiRecommendQuery, setAiRecommendQuery] = useState('');
+  const [aiRecommendLoading, setAiRecommendLoading] = useState(false);
+  const [aiLogs, setAiLogs] = useState<{time: string, text: string}[]>([]);
+  const [showAutoTagLogs, setShowAutoTagLogs] = useState(true);
+  const [drawingCards, setDrawingCards] = useState<any[]>([]);
+  const [aiRecommendResults, setAiRecommendResults] = useState<{char: any, reason: string}[] | null>(null);
+
+  const handleAIRecommend = async () => {
+    if (!aiRecommendQuery.trim()) return;
+    setAiRecommendLoading(true);
+    setAiLogs([]);
+    
+    const addLog = (text: string) => {
+      const now = new Date();
+      const time = `[${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}]`;
+      setAiLogs(prev => [...prev, { time, text }]);
+    };
+
+    try {
+      addLog("开始分析您的需求...");
+      await new Promise(resolve => setTimeout(resolve, 600));
+      addLog(`已加载本地角色库，共 ${characters.length} 个角色...`);
+      await new Promise(resolve => setTimeout(resolve, 800));
+      addLog("正在向 AI 请求提取核心关键词...");
+      
+      const results = await recommendCharacters(characters, aiRecommendQuery);
+      
+      addLog(`初步筛选出 ${results.length} 个候选角色，正在请求 AI 进行深度评估...`);
+      await new Promise(resolve => setTimeout(resolve, 600));
+      addLog("AI 评估完成！正在解析结果...");
+      await new Promise(resolve => setTimeout(resolve, 400));
+      addLog(`推荐完成！共为您找到 ${results.length} 个角色`);
+      
+      await new Promise(resolve => setTimeout(resolve, 800));
+
+      // Select the actual characters corresponding to the results for the drawing animation
+      const recommendedCharacters = characters
+        .filter(c => results.some(r => r.id === c.id))
+        .map(c => {
+            const reason = results.find(r => r.id === c.id)?.reason;
+            return { char: c, reason: reason || '' };
+        });
+
+      setAiRecommendResults(recommendedCharacters);
+      setActiveFilter({ type: 'tag', value: '', recommendResults: results } as any);
+      setShowAIRecommendModal(false);
+      setAiLogs([]); // reset after completion if needed, or keep for next time
+    } catch (e) {
+      console.error(e);
+      addLog("❌ API 请求失败或处理出错");
+      alert("AI推荐失败");
+    } finally {
+      setAiRecommendLoading(false);
+    }
+  };
+
+  type AutoTagQueueItem = {
+    char: Character;
+    status: 'pending' | 'processing' | 'review' | 'success' | 'fail';
+    generatedTags?: string[];
+    error?: string;
+    retries: number;
+    isRetag: boolean;
+  };
+
+  const autoTagStateRef = useRef<'idle' | 'running' | 'paused' | 'stopped'>('idle');
+  const [autoTagState, setAutoTagState] = useState<'idle' | 'running' | 'paused' | 'stopped'>('idle');
+  const autoTagQueueRef = useRef<AutoTagQueueItem[]>([]);
+  const [autoTagQueue, setAutoTagQueue] = useState<AutoTagQueueItem[]>([]);
+  const [autoTagProgress, setAutoTagProgress] = useState({total: 0, current: 0, success: 0, fail: 0});
+  
+  const processAutoTagQueue = async () => {
+    while (autoTagStateRef.current === 'running') {
+      const queue = autoTagQueueRef.current;
+      const pendingIndices = queue.map((q, idx) => ({q, idx}))
+        .filter(({q}) => q.status === 'pending' || (q.status === 'fail' && q.retries < 3))
+        .slice(0, 5)
+        .map(x => x.idx);
+
+      if (pendingIndices.length === 0) {
+        autoTagStateRef.current = 'stopped';
+        setAutoTagState('stopped');
+        break;
       }
-  });
+
+      setAutoTagQueue(prevQ => {
+           const newQ = [...prevQ];
+           pendingIndices.forEach(idx => { newQ[idx] = { ...newQ[idx], status: 'processing', error: undefined }; });
+           autoTagQueueRef.current = newQ;
+           return newQ;
+      });
+
+      const batchChars = pendingIndices.map(idx => autoTagQueueRef.current[idx].char);
+
+      try {
+        const results = await autoTagCharactersBatch(batchChars);
+        
+        let successCount = 0;
+        let failCount = 0;
+        
+        const newQ = [...autoTagQueueRef.current];
+        pendingIndices.forEach(idx => {
+            const q = newQ[idx];
+            const res = results.find(r => r.id === q.char.id);
+            if (res && res.tags && res.tags.length > 0) {
+                 const generatedTags = res.tags;
+                 if (q.isRetag) {
+                      newQ[idx] = { ...q, status: 'review', generatedTags };
+                      // Do not auto-increment successCount yet, it waits for user review
+                 } else {
+                      const currentTags = Array.isArray(q.char.tags) ? q.char.tags : [];
+                      const newTags = Array.from(new Set([...currentTags, ...generatedTags]));
+                      onUpdate?.({ ...q.char, tags: newTags });
+                      newQ[idx] = { ...q, status: 'success', generatedTags };
+                      successCount++;
+                 }
+            } else {
+                 newQ[idx] = { ...q, status: 'fail', error: "AI未返回结果可重试", retries: q.retries + 1 };
+                 if (newQ[idx].retries >= 3) failCount++;
+            }
+        });
+        
+        autoTagQueueRef.current = newQ;
+        setAutoTagQueue(newQ);
+        
+        setAutoTagProgress(p => ({ 
+             ...p, 
+             current: p.current + successCount + failCount, 
+             success: p.success + successCount,
+             fail: p.fail + failCount
+        }));
+
+      } catch (err: any) {
+         let failCount = 0;
+         const newQ = [...autoTagQueueRef.current];
+         pendingIndices.forEach(idx => {
+             const q = newQ[idx];
+             newQ[idx] = { ...q, status: 'fail', error: err.message || "请求失败", retries: q.retries + 1 };
+             if (newQ[idx].retries >= 3) failCount++;
+         });
+         
+         autoTagQueueRef.current = newQ;
+         setAutoTagQueue(newQ);
+         
+         setAutoTagProgress(p => ({ ...p, current: p.current + failCount, fail: p.fail + failCount }));
+         await new Promise(r => setTimeout(r, 2000));
+      }
+      
+      // Delay before next batch to respect rate limits
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  };
+
+  const handleStartAutoTag = () => {
+     if (autoTagState === 'paused' && autoTagQueue.length > 0) {
+         autoTagStateRef.current = 'running';
+         setAutoTagState('running');
+         processAutoTagQueue();
+         return;
+     }
+
+     const isRetag = autoTagTab === 'tagged';
+     const charsToProcess = characters.filter(c => {
+        const hasTags = Array.isArray(c.tags) && c.tags.length > 0;
+        return isRetag ? hasTags : !hasTags;
+     }).slice(0, autoTagBatchSize);
+
+     if (charsToProcess.length === 0) {
+       alert("没有找到符合条件的角色。");
+       return;
+     }
+
+     const newQueue: AutoTagQueueItem[] = charsToProcess.map(char => ({
+         char,
+         status: 'pending',
+         retries: 0,
+         isRetag
+     }));
+
+     autoTagQueueRef.current = newQueue;
+     setAutoTagQueue(newQueue);
+     setAutoTagProgress({ total: newQueue.length, current: 0, success: 0, fail: 0 });
+     autoTagStateRef.current = 'running';
+     setAutoTagState('running');
+
+     processAutoTagQueue();
+  };
+
+  const handlePauseAutoTag = () => {
+      autoTagStateRef.current = 'paused';
+      setAutoTagState('paused');
+  };
+
+  const handleStopAutoTag = () => {
+      autoTagStateRef.current = 'stopped';
+      setAutoTagState('stopped');
+  };
+
   const [isAddingTag, setIsAddingTag] = useState(false);
   const [isAddingCollection, setIsAddingCollection] = useState(false);
   const [newTagInputValue, setNewTagInputValue] = useState('');
   const [newCollectionInputValue, setNewCollectionInputValue] = useState('');
-
-  useEffect(() => {
-      localStorage.setItem('collections', JSON.stringify(collections));
-  }, [collections]);
 
   // Renaming State
   const [editingCollection, setEditingCollection] = useState<string | null>(null);
@@ -208,9 +410,8 @@ const CharacterList: React.FC<CharacterListProps> = ({
       if (charId) {
           const char = characters.find(c => c.id === charId);
           if (char) {
-              const currentTags = Array.isArray(char.tags) ? char.tags : [];
-              if (!currentTags.includes(collectionName)) {
-                  onUpdate?.({ ...char, tags: [...currentTags, collectionName] });
+              if (char.folder !== collectionName) {
+                  onUpdate?.({ ...char, folder: collectionName });
                   // Optional: Show success feedback
               }
           }
@@ -223,17 +424,8 @@ const CharacterList: React.FC<CharacterListProps> = ({
           return;
       }
       const newName = renameValue.trim();
-      if (newName !== editingCollection && !collections.includes(newName)) {
-          setCollections(prev => prev.map(c => c === editingCollection ? newName : c));
-          
-          // Update characters
-          characters.forEach(char => {
-              const currentTags = Array.isArray(char.tags) ? char.tags : [];
-              if (currentTags.includes(editingCollection)) {
-                  const newTags = currentTags.map(t => t === editingCollection ? newName : t);
-                  onUpdate?.({ ...char, tags: newTags });
-              }
-          });
+      if (newName !== editingCollection && !folders.includes(newName)) {
+          onRenameFolder?.(editingCollection, newName);
           if (activeFilter.type === 'collection' && activeFilter.value === editingCollection) {
               setActiveFilter({ ...activeFilter, value: newName });
           }
@@ -305,19 +497,17 @@ const CharacterList: React.FC<CharacterListProps> = ({
     setCurrentPage(1);
   }, [itemsPerPage, sortOption, activeFilter]);
 
-  // Compute unique tags (excluding collections)
+  // Compute unique tags
   const allTags = useMemo(() => {
     const tags = new Set<string>(customTags);
     characters.forEach(c => {
       const currentTags = Array.isArray(c.tags) ? c.tags : [];
       currentTags.forEach(t => {
-          if (!collections.includes(t)) {
-              tags.add(t);
-          }
+          tags.add(t);
       });
     });
     return Array.from(tags).sort();
-  }, [characters, customTags, collections]);
+  }, [characters, customTags]);
 
   const duplicateIds = useMemo(() => {
     const seenNames = new Map<string, string[]>();
@@ -349,12 +539,15 @@ const CharacterList: React.FC<CharacterListProps> = ({
     }
     
     // Apply Active Filter
-    if (activeFilter.type === 'favorite') {
+    if ((activeFilter as any).recommendResults) {
+        const recommendedIds = ((activeFilter as any).recommendResults as any[]).map(r => r.id);
+        result = result.filter(c => recommendedIds.includes(c.id));
+    } else if (activeFilter.type === 'favorite') {
         result = result.filter(c => c.isFavorite);
     } else if (activeFilter.type === 'tag' && activeFilter.value) {
         result = result.filter(c => (Array.isArray(c.tags) ? c.tags : []).includes(activeFilter.value || ''));
     } else if (activeFilter.type === 'collection' && activeFilter.value) {
-        result = result.filter(c => (Array.isArray(c.tags) ? c.tags : []).includes(activeFilter.value || ''));
+        result = result.filter(c => c.folder === activeFilter.value);
     } else if (activeFilter.type === 'duplicate') {
         result = result.filter(c => duplicateIds.has(c.id));
     }
@@ -646,7 +839,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
     const selectedChars = characters.filter(c => selectedIds.has(c.id));
     if (selectedChars.length === 0) return;
     try {
-        await exportBulkCharacters(selectedChars, collections);
+        await exportBulkCharacters(selectedChars, folders);
         setIsSelectionMode(false);
         setSelectedIds(new Set());
         setLastSelectedId(null);
@@ -679,7 +872,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
 
   const handleAddTag = () => {
     const tag = newTagInputValue.trim();
-    if (tag && !allTags.includes(tag) && !collections.includes(tag)) {
+    if (tag && !allTags.includes(tag)) {
         setCustomTags(prev => [...prev, tag]);
         setNewTagInputValue('');
         setIsAddingTag(false);
@@ -688,8 +881,8 @@ const CharacterList: React.FC<CharacterListProps> = ({
 
   const handleAddCollection = () => {
       const name = newCollectionInputValue.trim();
-      if (name && !collections.includes(name) && !allTags.includes(name)) {
-          setCollections(prev => [...prev, name]);
+      if (name && !folders.includes(name)) {
+          onCreateFolder?.(name);
           setNewCollectionInputValue('');
           setIsAddingCollection(false);
       }
@@ -697,18 +890,9 @@ const CharacterList: React.FC<CharacterListProps> = ({
 
   const handleDeleteCollection = (name: string, e: React.MouseEvent) => {
       e.stopPropagation();
-      if (!window.confirm(`确定要删除收藏夹 "${name}" 吗? 这将从所有角色中移除此标签。`)) return;
+      if (!window.confirm(`确定要删除文件夹 "${name}" 吗? 其中的角色将被移出。`)) return;
       
-      setCollections(prev => prev.filter(c => c !== name));
-      
-      // Remove tag from characters
-      characters.forEach(char => {
-          const currentTags = Array.isArray(char.tags) ? char.tags : [];
-          if (currentTags.includes(name)) {
-              const newTags = currentTags.filter(t => t !== name);
-              onUpdate?.({ ...char, tags: newTags });
-          }
-      });
+      onDeleteFolder?.(name);
 
       if (activeFilter.type === 'collection' && activeFilter.value === name) {
           setActiveFilter({ type: 'all' });
@@ -734,6 +918,60 @@ const CharacterList: React.FC<CharacterListProps> = ({
       if (activeFilter.type === 'tag' && activeFilter.value === tagToDelete) {
           setActiveFilter({ type: 'all' });
       }
+  };
+
+  const handleAutoCleanDuplicates = () => {
+    if (!groupedCharacters) return;
+    
+    const idsToDelete = new Set<string>();
+    
+    groupedCharacters.forEach(([name, chars]) => {
+      // Find identical subgroups based on core content
+      const contentMap = new Map<string, Character[]>();
+      chars.forEach(c => {
+        // Exclude properties that could vary without changing the core meaning:
+        // id, importDate, fileLastModified, avatarUrl, cardUrl
+        const hashObj = {
+          firstMessage: c.firstMessage || '',
+          description: c.description || '',
+          personality: c.personality || '',
+          scenario: c.scenario || '',
+          mes_example: c.mes_example || '',
+          system_prompt: c.system_prompt || '',
+          creator_notes: c.creator_notes || '',
+          post_history_instructions: c.post_history_instructions || '',
+          tags: Array.isArray(c.tags) ? [...c.tags].sort() : [],
+          alternate_greetings: Array.isArray(c.alternate_greetings) ? [...c.alternate_greetings] : [],
+        };
+        const contentHash = JSON.stringify(hashObj);
+        if (!contentMap.has(contentHash)) contentMap.set(contentHash, []);
+        contentMap.get(contentHash)!.push(c);
+      });
+      
+      contentMap.forEach((identicalChars) => {
+        if (identicalChars.length > 1) {
+          // Sort by date descending (newest first)
+          const sorted = [...identicalChars].sort((a, b) => {
+            const timeA = Math.max(a.updatedAt || 0, a.importDate || 0, a.fileLastModified || 0);
+            const timeB = Math.max(b.updatedAt || 0, b.importDate || 0, b.fileLastModified || 0);
+            return timeB - timeA;
+          });
+          // Keep sorted[0], mark rest for deletion
+          for (let i = 1; i < sorted.length; i++) {
+            idsToDelete.add(sorted[i].id);
+          }
+        }
+      });
+    });
+    
+    if (idsToDelete.size === 0) {
+      alert("没有发现【名称且核心内容完全相同】的旧版卡片。\n现有的同名重复卡片似乎内容均有差异，需要您手动鉴别。");
+      return;
+    }
+    
+    setSelectedIds(prev => new Set([...prev, ...Array.from(idsToDelete)]));
+    setIsSelectionMode(true);
+    alert(`已为您选中 ${idsToDelete.size} 张【名称且核心内容完全一致】的旧版重复卡片。\n您可以预览并确认无误后，点击头部的垃圾桶图标进行批量删除。`);
   };
 
   const textColor = theme === 'light' ? 'text-slate-800' : 'text-white';
@@ -794,6 +1032,36 @@ const CharacterList: React.FC<CharacterListProps> = ({
                   </span>
               </button>
 
+              {/* AI Features */}
+              <button 
+                  onClick={() => setShowAIRecommendModal(true)}
+                  className={`w-full text-left px-4 py-2.5 rounded-xl text-sm font-medium flex items-center gap-2 mt-1 transition-all group ${
+                      theme === 'light' ? 'hover:bg-white/60 text-slate-600 hover:shadow-sm' : 'hover:bg-white/10 text-gray-400'
+                  }`}
+              >
+                  <Sparkles size={14} />
+                  <span>AI 智能推荐</span>
+              </button>
+              <button 
+                  onClick={() => setShowAutoTagModal(true)}
+                  className={`w-full text-left px-4 py-2.5 rounded-xl text-sm font-medium flex items-center gap-2 transition-all group ${
+                      theme === 'light' ? 'hover:bg-white/60 text-slate-600 hover:shadow-sm' : 'hover:bg-white/10 text-gray-400'
+                  }`}
+              >
+                  <Tag size={14} />
+                  <span>批量自动打标</span>
+              </button>
+
+              <button 
+                  onClick={() => setShowApiConfigModal(true)}
+                  className={`w-full text-left px-4 py-2.5 rounded-xl text-sm font-medium flex items-center gap-2 mt-1 transition-all group ${
+                      theme === 'light' ? 'hover:bg-white/60 text-slate-600 hover:shadow-sm' : 'hover:bg-white/10 text-gray-400'
+                  }`}
+              >
+                  <Zap size={14} />
+                  <span>API 连接</span>
+              </button>
+
               <div className={`h-px my-3 mx-2 ${theme === 'light' ? 'bg-slate-200/60' : 'bg-white/5'}`}></div>
 
               {/* Collections Header */}
@@ -803,13 +1071,13 @@ const CharacterList: React.FC<CharacterListProps> = ({
                       className={`flex-1 text-left font-bold text-xs uppercase tracking-wider flex items-center gap-2 ${theme === 'light' ? 'text-slate-400 hover:text-slate-600' : 'text-gray-500 hover:text-gray-300'}`}
                   >
                       <Folder size={14} />
-                      <span>收藏夹 ({collections.length})</span>
+                      <span>文件夹 ({folders.length})</span>
                       {isCollectionsExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                   </button>
                   <button 
                       onClick={() => setIsAddingCollection(!isAddingCollection)}
                       className={`p-1 rounded-md transition-colors ${theme === 'light' ? 'hover:bg-slate-200 text-slate-400 hover:text-slate-600' : 'hover:bg-white/10 text-gray-500 hover:text-gray-300'}`}
-                      title="新建收藏夹"
+                      title="新建文件夹"
                   >
                       <FolderPlus size={14} />
                   </button>
@@ -835,12 +1103,12 @@ const CharacterList: React.FC<CharacterListProps> = ({
                                   if (newCollectionInputValue.trim()) handleAddCollection();
                                   else setIsAddingCollection(false);
                               }}
-                              placeholder="收藏夹名称..."
+                              placeholder="文件夹名称..."
                               className={`w-full px-3 py-2 rounded-xl text-sm outline-none border ${theme === 'light' ? 'bg-white border-blue-500 text-slate-800' : 'bg-black/40 border-blue-500 text-white'}`}
                           />
                       </div>
                   )}
-                  {collections.map(name => (
+                  {folders.map(name => (
                       <div key={name} className="relative group">
                           {editingCollection === name ? (
                               <input
@@ -869,7 +1137,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
                               >
                                   <Folder size={14} className="opacity-70" />
                                   <span className="truncate flex-1">{name}</span>
-                                  <span className="text-[10px] opacity-50 group-hover:opacity-0 transition-opacity">{characters.filter(c => (Array.isArray(c.tags) ? c.tags : []).includes(name)).length}</span>
+                                  <span className="text-[10px] opacity-50 group-hover:opacity-0 transition-opacity">{characters.filter(c => c.folder === name).length}</span>
                                   
                                   {/* Actions */}
                                   <div className={`absolute right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all`}>
@@ -892,9 +1160,9 @@ const CharacterList: React.FC<CharacterListProps> = ({
                           )}
                       </div>
                   ))}
-                  {collections.length === 0 && !isAddingCollection && (
+                  {folders.length === 0 && !isAddingCollection && (
                       <div className={`text-center py-4 text-xs ${theme === 'light' ? 'text-slate-400' : 'text-gray-600'}`}>
-                          暂无收藏夹
+                          暂无文件夹
                       </div>
                   )}
               </div>
@@ -908,113 +1176,6 @@ const CharacterList: React.FC<CharacterListProps> = ({
                   }}
               >
                   <div className={`w-8 h-1 rounded-full transition-colors ${resizingTarget === 'collections' ? 'bg-blue-500' : (theme === 'light' ? 'bg-slate-300 group-hover:bg-slate-400' : 'bg-white/20 group-hover:bg-white/40')}`}></div>
-              </div>
-
-              {/* Tags Header */}
-              <div className={`w-full px-2 py-2 flex items-center justify-between shrink-0`}>
-                  <button 
-                      onClick={() => setIsTagsExpanded(!isTagsExpanded)}
-                      className={`flex-1 text-left font-bold text-xs uppercase tracking-wider flex items-center gap-2 ${theme === 'light' ? 'text-slate-400 hover:text-slate-600' : 'text-gray-500 hover:text-gray-300'}`}
-                  >
-                      <Tag size={14} />
-                      <span>标签 ({allTags.length})</span>
-                      {isTagsExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                  </button>
-                  <button 
-                      onClick={() => setIsAddingTag(!isAddingTag)}
-                      className={`p-1 rounded-md transition-colors ${theme === 'light' ? 'hover:bg-slate-200 text-slate-400 hover:text-slate-600' : 'hover:bg-white/10 text-gray-500 hover:text-gray-300'}`}
-                      title="Add Tag"
-                  >
-                      <Plus size={14} />
-                  </button>
-              </div>
-
-              {/* Tags List */}
-              <div 
-                  className={`min-h-0 overflow-y-auto custom-scrollbar space-y-1 transition-all duration-300 shrink-0 ${isTagsExpanded ? 'opacity-100' : 'h-0 opacity-0 overflow-hidden'}`}
-                  style={isTagsExpanded ? { height: `${tagsHeight}px` } : {}}
-              >
-                  {isAddingTag && (
-                      <div className="px-2 mb-2">
-                          <input
-                              autoFocus
-                              type="text"
-                              value={newTagInputValue}
-                              onChange={(e) => setNewTagInputValue(e.target.value)}
-                              onKeyDown={(e) => {
-                                  if (e.key === 'Enter') handleAddTag();
-                                  if (e.key === 'Escape') setIsAddingTag(false);
-                              }}
-                              onBlur={() => {
-                                  if (newTagInputValue.trim()) handleAddTag();
-                                  else setIsAddingTag(false);
-                              }}
-                              placeholder="New tag..."
-                              className={`w-full px-3 py-2 rounded-xl text-sm outline-none border ${theme === 'light' ? 'bg-white border-blue-500 text-slate-800' : 'bg-black/40 border-blue-500 text-white'}`}
-                          />
-                      </div>
-                  )}
-                  {allTags.map(tag => (
-                      <div key={tag} className="relative group">
-                          {editingTag === tag ? (
-                              <input
-                                  autoFocus
-                                  type="text"
-                                  value={renameValue}
-                                  onChange={(e) => setRenameValue(e.target.value)}
-                                  onKeyDown={(e) => {
-                                      if (e.key === 'Enter') handleFinishRenameTag();
-                                      if (e.key === 'Escape') setEditingTag(null);
-                                  }}
-                                  onBlur={handleFinishRenameTag}
-                                  className={`w-full px-3 py-2 rounded-xl text-sm outline-none border ${theme === 'light' ? 'bg-white border-blue-500 text-slate-800' : 'bg-black/40 border-blue-500 text-white'}`}
-                              />
-                          ) : (
-                              <button
-                                  onClick={() => setActiveFilter({ type: 'tag', value: tag })}
-                                  onDoubleClick={(e) => handleStartRenameTag(tag, e)}
-                                  className={`w-full text-left px-4 py-2.5 rounded-xl text-sm font-medium flex items-center gap-2 transition-all group relative ${activeFilter.type === 'tag' && activeFilter.value === tag ? (theme === 'light' ? 'bg-slate-200 text-slate-900' : 'bg-white/20 text-white') : (theme === 'light' ? 'hover:bg-white/50 text-slate-500' : 'hover:bg-white/5 text-gray-400')}`}
-                              >
-                                  <span className="truncate flex-1"># {tag}</span>
-                                  <span className="text-[10px] opacity-50 group-hover:opacity-0 transition-opacity">{characters.filter(c => (Array.isArray(c.tags) ? c.tags : []).includes(tag)).length}</span>
-                                  
-                                  {/* Actions */}
-                                  <div className={`absolute right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all`}>
-                                      <div 
-                                          onClick={(e) => handleStartRenameTag(tag, e)}
-                                          className={`p-1.5 rounded-lg ${theme === 'light' ? 'hover:bg-blue-100 text-blue-400' : 'hover:bg-blue-500/20 text-blue-400'}`}
-                                          title="重命名"
-                                      >
-                                          <Pencil size={12} />
-                                      </div>
-                                      <div 
-                                          onClick={(e) => handleDeleteTag(tag, e)}
-                                          className={`p-1.5 rounded-lg ${theme === 'light' ? 'hover:bg-red-100 text-red-400' : 'hover:bg-red-500/20 text-red-400'}`}
-                                          title="删除"
-                                      >
-                                          <Trash2 size={12} />
-                                      </div>
-                                  </div>
-                              </button>
-                          )}
-                      </div>
-                  ))}
-                  {allTags.length === 0 && !isAddingTag && (
-                      <div className={`text-center py-4 text-xs ${theme === 'light' ? 'text-slate-400' : 'text-gray-600'}`}>
-                          暂无标签
-                      </div>
-                  )}
-              </div>
-
-              {/* Resize Handle for Tags */}
-              <div 
-                  className={`h-1.5 my-1 mx-2 shrink-0 cursor-row-resize flex items-center justify-center group transition-colors rounded-full ${resizingTarget === 'tags' ? 'bg-blue-500/50' : (theme === 'light' ? 'hover:bg-slate-200' : 'hover:bg-white/10')}`}
-                  onMouseDown={(e) => {
-                      e.preventDefault();
-                      setResizingTarget('tags');
-                  }}
-              >
-                  <div className={`w-8 h-1 rounded-full transition-colors ${resizingTarget === 'tags' ? 'bg-blue-500' : (theme === 'light' ? 'bg-slate-300 group-hover:bg-slate-400' : 'bg-white/20 group-hover:bg-white/40')}`}></div>
               </div>
 
               {/* Spacer to fill remaining space */}
@@ -1039,12 +1200,14 @@ const CharacterList: React.FC<CharacterListProps> = ({
                    {activeFilter.type === 'tag' && `# ${activeFilter.value}`}
                    {activeFilter.type === 'collection' && `${activeFilter.value}`}
                    {activeFilter.type === 'duplicate' && '重复角色'}
+                   {(activeFilter as any).recommendResults && 'AI 智能推荐结果'}
                </h1>
                <p className={`text-xs ${subTextColor}`}>
                    {activeFilter.type === 'all' && `共 ${characters.length} 张卡片`}
                    {activeFilter.type === 'tag' && `标签 "${activeFilter.value}" 下共 ${characters.filter(c => (Array.isArray(c.tags) ? c.tags : []).includes(activeFilter.value || '')).length} 张卡片`}
-                   {activeFilter.type === 'collection' && `收藏夹 "${activeFilter.value}" 下共 ${characters.filter(c => (Array.isArray(c.tags) ? c.tags : []).includes(activeFilter.value || '')).length} 张卡片`}
+                   {activeFilter.type === 'collection' && `文件夹 "${activeFilter.value}" 下共 ${characters.filter(c => (Array.isArray(c.tags) ? c.tags : []).includes(activeFilter.value || '')).length} 张卡片`}
                    {activeFilter.type === 'duplicate' && `共 ${duplicateIds.size} 张重复卡片`}
+                   {(activeFilter as any).recommendResults && `根据关键词找到 ${(activeFilter as any).recommendResults?.length} 张卡片`}
                </p>
            </div>
 
@@ -1066,7 +1229,110 @@ const CharacterList: React.FC<CharacterListProps> = ({
            </div>
         </div>
         
-        <div className="flex flex-wrap gap-2 items-center justify-end">
+        <div className="flex flex-wrap gap-2 items-center justify-end relative">
+            <div className="relative flex items-center">
+                <button 
+                    onClick={() => {
+                        setShowTagFilterModal(!showTagFilterModal);
+                        setTagFilterMode('view');
+                    }}
+                    className={`flex items-center justify-center p-2 rounded-full border backdrop-blur-sm transition-all ${buttonBase} ${activeFilter.type === 'tag' ? activeFilterClass : ''}`}
+                    title="标签筛选"
+                >
+                    <Filter size={16} />
+                </button>
+                
+                {/* Tag Filter Popover */}
+                {showTagFilterModal && (
+                    <div className={`absolute top-full mt-2 right-0 w-[400px] z-[150] rounded-2xl shadow-2xl border animate-in slide-in-from-top-4 fade-in duration-200 overflow-hidden ${theme === 'light' ? 'bg-white border-slate-200/50' : 'bg-gray-900 border-white/10'}`}>
+                     <div className={`px-4 py-3 border-b flex justify-between items-center ${theme === 'light' ? 'border-slate-100 bg-slate-50/50' : 'border-white/10 bg-white/5'}`}>
+                         <span className="font-bold text-sm flex items-center gap-2">
+                             <Tag size={14} className="opacity-70" /> 标签筛选
+                         </span>
+                         {tagFilterMode === 'view' ? (
+                             <button 
+                               onClick={() => setTagFilterMode('edit')}
+                               className={`text-[10px] uppercase font-bold px-2 py-1 rounded transition-colors ${theme === 'light' ? 'text-slate-500 hover:bg-slate-200' : 'text-gray-400 hover:bg-white/10'}`}
+                             >编辑标签</button>
+                         ) : (
+                             <button 
+                               onClick={() => setTagFilterMode('view')}
+                               className={`text-[10px] uppercase font-bold px-2 py-1 rounded transition-colors ${theme === 'light' ? 'bg-slate-800 text-white' : 'bg-white text-gray-900'}`}
+                             >完成编辑</button>
+                         )}
+                     </div>
+                     <div className="p-4 max-h-[400px] overflow-y-auto custom-scrollbar">
+                        <div className="space-y-4">
+                            {tagFilterMode === 'view' ? (
+                                <>
+                                    {activeFilter.type === 'tag' && activeFilter.value && (
+                                        <div className="flex justify-end">
+                                            <button 
+                                                onClick={() => setActiveFilter({ type: 'all' })}
+                                                className={`text-xs hover:underline pt-1 ${theme === 'light' ? 'text-slate-500' : 'text-gray-400'}`}
+                                            >
+                                                清空选中
+                                            </button>
+                                        </div>
+                                    )}
+                                    <div className="flex flex-wrap gap-2">
+                                        {allTags.map(tag => (
+                                            <button
+                                                key={tag}
+                                                onClick={() => setActiveFilter({ type: 'tag', value: tag })}
+                                                className={`px-3 py-1.5 rounded-lg text-sm transition-all border ${
+                                                    activeFilter.type === 'tag' && activeFilter.value === tag 
+                                                        ? (theme === 'light' ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-900 border-white')
+                                                        : (theme === 'light' ? 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700' : 'bg-transparent border-white/20 hover:bg-white/10 text-gray-300')
+                                                }`}
+                                            >
+                                                {tag}
+                                            </button>
+                                        ))}
+                                        {allTags.length === 0 && (
+                                            <div className="w-full text-center py-8 text-sm opacity-50">暂无可用的标签</div>
+                                        )}
+                                    </div>
+                                </>
+                            ) : (
+                                <div className="flex flex-wrap gap-2">
+                                    {allTags.map(tag => (
+                                        <div key={tag} className={`flex items-center gap-1 py-1 pl-3 pr-1.5 rounded-lg border text-sm ${theme === 'light' ? 'bg-white border-slate-200 text-slate-700' : 'bg-transparent border-white/20 text-gray-300'}`}>
+                                            {editingTag === tag ? (
+                                                <input
+                                                    autoFocus
+                                                    type="text"
+                                                    value={renameValue}
+                                                    onChange={(e) => setRenameValue(e.target.value)}
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === 'Enter') handleFinishRenameTag();
+                                                        if (e.key === 'Escape') setEditingTag(null);
+                                                    }}
+                                                    onBlur={handleFinishRenameTag}
+                                                    className={`w-[120px] px-2 py-0.5 rounded-md text-sm outline-none border ${theme === 'light' ? 'bg-white border-blue-500 text-slate-800' : 'bg-black/40 border-blue-500 text-white'}`}
+                                                />
+                                            ) : (
+                                                <>
+                                                    <span className="font-medium mr-1">{tag}</span>
+                                                    <div className="flex gap-0.5 shrink-0">
+                                                        <button onClick={(e) => handleStartRenameTag(tag, e)} className={`p-1.5 rounded transition-colors ${theme === 'light' ? 'hover:bg-slate-200 text-slate-500 hover:text-slate-800' : 'hover:bg-white/10 text-gray-400 hover:text-white'}`}><Pencil size={14}/></button>
+                                                        <button onClick={(e) => handleDeleteTag(tag, e)} className={`p-1.5 rounded transition-colors ${theme === 'light' ? 'hover:bg-red-100 text-slate-500 hover:text-red-500' : 'hover:bg-red-500/20 text-gray-400 hover:text-red-400'}`}><Trash2 size={14}/></button>
+                                                    </div>
+                                                </>
+                                            )}
+                                        </div>
+                                    ))}
+                                    {allTags.length === 0 && (
+                                        <div className="w-full text-center py-8 text-sm opacity-50">暂无可用的标签</div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                     </div>
+                </div>
+            )}
+            </div>
+
             <div className={`flex items-center gap-2 px-3 py-1.5 border rounded-full text-xs font-medium backdrop-blur-sm ${buttonBase}`}>
                 <span className="opacity-70">排序:</span>
                 <select 
@@ -1166,31 +1432,63 @@ const CharacterList: React.FC<CharacterListProps> = ({
                  <span className="text-sm font-bold opacity-80 border-l border-current pl-4">已选 {selectedIds.size} 项</span>
              </div>
              <div className="flex gap-3">
-                 {selectedIds.size === 2 && (
-                     <Button 
-                         variant="secondary" 
-                         onClick={() => setCompareModalOpen(true)} 
-                         className="!py-1.5 !px-4 !text-xs !h-9 !rounded-lg shadow-sm hover:shadow-md transition-all bg-indigo-500 hover:bg-indigo-600 text-white border-none"
+                 {activeFilter.type === 'duplicate' && (
+                     <button
+                         onClick={handleAutoCleanDuplicates} 
+                         className={`flex items-center gap-1.5 px-4 py-1.5 text-xs h-9 rounded-lg border shadow-sm transition-all ${theme === 'light' ? 'bg-white hover:bg-slate-50 border-slate-200 text-slate-700' : 'bg-white/5 hover:bg-white/10 border-white/10 text-gray-200'}`}
+                         title="自动对比并选中内容完全一致的较旧版本"
                      >
-                        <GitCompare size={14} className="mr-1.5" /> 对比选中 (2)
-                     </Button>
+                        <Sparkles size={14} /> 智能清理重复
+                     </button>
                  )}
-                 <Button 
-                     variant="primary" 
+                 {selectedIds.size > 0 && (
+                     <button
+                         onClick={() => {
+                             const tag = window.prompt("输入要批量添加的标签名称:");
+                             if (tag && tag.trim()) {
+                                 const trimmedTag = tag.trim();
+                                 let count = 0;
+                                 characters.forEach(char => {
+                                     if (selectedIds.has(char.id)) {
+                                         const currentTags = Array.isArray(char.tags) ? char.tags : [];
+                                         if (!currentTags.includes(trimmedTag)) {
+                                             onUpdate?.({ ...char, tags: [...currentTags, trimmedTag] });
+                                             count++;
+                                         }
+                                     }
+                                 });
+                                 alert(`批量添加标签 "${trimmedTag}" 成功，应用到 ${count} 个角色。`);
+                                 setSelectedIds(new Set());
+                                 setIsSelectionMode(false);
+                             }
+                         }} 
+                         className={`flex items-center gap-1.5 px-4 py-1.5 text-xs h-9 rounded-lg border shadow-sm transition-all ${theme === 'light' ? 'bg-white hover:bg-slate-50 border-slate-200 text-slate-700' : 'bg-white/5 hover:bg-white/10 border-white/10 text-gray-200'}`}
+                     >
+                        <Tag size={14} /> 批量加标签
+                     </button>
+                 )}
+                 {selectedIds.size === 2 && (
+                     <button
+                         onClick={() => setCompareModalOpen(true)} 
+                         className={`flex items-center gap-1.5 px-4 py-1.5 text-xs h-9 rounded-lg border shadow-sm transition-all ${theme === 'light' ? 'bg-white hover:bg-slate-50 border-slate-200 text-slate-700' : 'bg-white/5 hover:bg-white/10 border-white/10 text-gray-200'}`}
+                     >
+                        <GitCompare size={14} /> 对比选中 (2)
+                     </button>
+                 )}
+                 <button
                      disabled={selectedIds.size === 0} 
                      onClick={handleBulkExport} 
-                     className="!py-1.5 !px-4 !text-xs !h-9 !rounded-lg shadow-sm hover:shadow-md transition-all bg-blue-500 hover:bg-blue-600 border-none"
+                     className={`flex items-center gap-1.5 px-4 py-1.5 text-xs h-9 rounded-lg border shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed ${theme === 'light' ? 'bg-white hover:bg-slate-50 border-slate-200 text-slate-700' : 'bg-white/5 hover:bg-white/10 border-white/10 text-gray-200'}`}
                  >
-                    <Download size={14} className="mr-1.5" /> 导出 (ZIP)
-                 </Button>
-                 <Button 
-                     variant="danger" 
+                    <Download size={14} /> 导出 (ZIP)
+                 </button>
+                 <button
                      disabled={selectedIds.size === 0} 
                      onClick={() => {if(window.confirm(`确定删除这 ${selectedIds.size} 张卡片吗?`)) { onDeleteBatch?.(Array.from(selectedIds), true); setSelectedIds(new Set()); }}} 
-                     className="!py-1.5 !px-4 !text-xs !h-9 !rounded-lg shadow-sm hover:shadow-md transition-all bg-red-500 hover:bg-red-600 border-none"
+                     className={`flex items-center gap-1.5 px-4 py-1.5 text-xs h-9 rounded-lg border shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed ${theme === 'light' ? 'bg-white hover:bg-red-50 border-slate-200 text-red-500' : 'bg-white/5 hover:bg-red-500/20 border-white/10 text-red-400'}`}
                  >
-                    <Trash2 size={14} className="mr-1.5" /> 删除
-                 </Button>
+                    <Trash2 size={14} /> 删除
+                 </button>
              </div>
           </div>
       )}
@@ -1384,6 +1682,345 @@ const CharacterList: React.FC<CharacterListProps> = ({
           </div>
         </div>
       </Modal>
+
+      {/* AI Recommend Modal */}
+      <Modal
+        isOpen={showAIRecommendModal}
+        onClose={() => setShowAIRecommendModal(false)}
+        title="✨ AI 智能推荐"
+        theme={theme}
+      >
+        <div className="space-y-6">
+          <div>
+            <p className="text-sm font-bold opacity-80 mb-2">你想玩怎样的剧情或角色？</p>
+            <div className={`relative rounded-xl border p-1 transition-colors ${theme === 'light' ? 'bg-white border-slate-200 focus-within:border-slate-800' : 'bg-black/20 border-white/10 focus-within:border-white/50'}`}>
+                <textarea
+                  rows={4}
+                  placeholder="例如: 我是主播，给我找个榜一大哥的卡..."
+                  value={aiRecommendQuery}
+                  onChange={(e) => setAiRecommendQuery(e.target.value)}
+                  className="w-full p-3 bg-transparent outline-none resize-none text-sm"
+                />
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-2 text-xs font-bold opacity-60">
+              <Sparkles size={14} />
+              <p>不知道玩什么？试试随机抽卡！（不消耗 API）</p>
+          </div>
+
+          <div className="flex justify-between gap-4">
+            <Button 
+                variant="secondary" 
+                onClick={() => {
+                    const randomChar = characters[Math.floor(Math.random() * characters.length)];
+                    setDrawingCards([randomChar]);
+                    setShowAIRecommendModal(false);
+                }} 
+                className={`flex-1 py-4 !rounded-2xl ${theme === 'light' ? '!text-slate-700 !bg-slate-100 hover:!bg-slate-200 !border-slate-200' : ''}`}
+                disabled={aiRecommendLoading}
+            >
+                <div className="flex flex-col items-center gap-1">
+                    <Dices size={20} />
+                    <span>随机抽卡</span>
+                </div>
+            </Button>
+            <Button 
+                variant="primary" 
+                onClick={handleAIRecommend} 
+                disabled={aiRecommendLoading}
+                className={`flex-1 py-4 !rounded-2xl shadow-lg ${theme === 'light' ? '!bg-slate-800 hover:!bg-slate-700 !text-white !border-none shadow-slate-800/20' : 'shadow-black/50'}`}
+            >
+               <div className="flex flex-col items-center gap-1">
+                   {aiRecommendLoading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Sparkles size={20} />}
+                   <span>{aiRecommendLoading ? '处理中...' : '开始推荐'}</span>
+               </div>
+            </Button>
+          </div>
+
+          {/* AI Logs */}
+          {(aiLogs.length > 0 || aiRecommendLoading) && (
+            <div className={`mt-4 rounded-xl border p-4 font-mono text-xs shadow-inner ${theme === 'light' ? 'bg-[#0f111a] border-slate-800 text-teal-400' : 'bg-[#0a0a0c] border-white/10 text-teal-500'}`}>
+                <div className="flex items-center gap-2 mb-3 text-gray-500 border-b border-gray-800 pb-2">
+                    <span>{'>_ AI 思维链 (CHAIN OF THOUGHT)'}</span>
+                </div>
+                <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar">
+                    {aiLogs.map((log, idx) => (
+                        <div key={idx} className="flex items-start gap-2 animate-in fade-in slide-in-from-bottom-1">
+                            <span className="opacity-50 shrink-0">{log.time}</span>
+                            <span className="break-all">{log.text}</span>
+                        </div>
+                    ))}
+                    {aiRecommendLoading && (
+                        <div className="flex items-start gap-2 animate-pulse mt-2 opacity-70">
+                            <span className="shrink-0">[{new Date().getHours().toString().padStart(2, '0')}:{new Date().getMinutes().toString().padStart(2, '0')}:{new Date().getSeconds().toString().padStart(2, '0')}]</span>
+                            <span className="flex items-center gap-1">
+                                <RefreshCw className="animate-spin" size={12} /> 正在处理中...
+                            </span>
+                        </div>
+                    )}
+                </div>
+            </div>
+          )}
+        </div>
+      </Modal>
+
+      {/* Auto Tag Modal */}
+      <Modal
+        isOpen={showAutoTagModal}
+        onClose={() => setShowAutoTagModal(false)}
+        title="批量自动打标"
+        theme={theme}
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-gray-500 mb-2">使用 AI 自动识别角色设定并生成标签</p>
+          <div className={`flex gap-4 border-b ${theme === 'light' ? 'border-slate-200' : 'border-white/10'}`}>
+              <button 
+                  onClick={() => setAutoTagTab('untagged')}
+                  className={`pb-2 text-sm font-bold transition-all border-b-2 ${autoTagTab === 'untagged' ? (theme === 'light' ? 'border-slate-800 text-slate-800' : 'border-white text-white') : 'border-transparent opacity-60 hover:opacity-100'}`}
+              >
+                  未打标 ({characters.filter(c => !c.tags || c.tags.length === 0).length})
+              </button>
+              <button 
+                  onClick={() => setAutoTagTab('tagged')}
+                  className={`pb-2 text-sm font-bold transition-all border-b-2 ${autoTagTab === 'tagged' ? (theme === 'light' ? 'border-slate-800 text-slate-800' : 'border-white text-white') : 'border-transparent opacity-60 hover:opacity-100'}`}
+              >
+                  重新打标 ({characters.filter(c => Array.isArray(c.tags) && c.tags.length > 0).length})
+              </button>
+          </div>
+
+          <div className={`p-4 rounded-xl border ${theme === 'light' ? 'bg-slate-50 border-slate-200' : 'bg-white/5 border-white/10'}`}>
+              <div className={`flex items-center gap-2 mb-2 font-bold text-sm ${theme === 'light' ? 'text-slate-800' : 'text-gray-200'}`}>
+                  {autoTagTab === 'untagged' ? <Tag size={16} /> : <RefreshCw size={16} />}
+                  <span>{autoTagTab === 'untagged' ? '待打标角色' : '重新打标'}</span>
+              </div>
+              <p className="text-xs opacity-70 mb-4">
+                  {autoTagTab === 'untagged' 
+                      ? `共发现 ${characters.filter(c => !c.tags || c.tags.length === 0).length} 个未打标的角色卡`
+                      : `共发现 ${characters.filter(c => Array.isArray(c.tags) && c.tags.length > 0).length} 个已打标签的角色卡`}
+              </p>
+              
+              <div className="flex items-center gap-2 mb-4">
+                  <span className="text-xs opacity-70">每次处理</span>
+                  <select 
+                      value={autoTagBatchSize} 
+                      onChange={e => setAutoTagBatchSize(Number(e.target.value))}
+                      className={`text-sm rounded-lg p-1.5 outline-none font-medium ${theme === 'light' ? 'bg-white border-slate-200 text-slate-800' : 'bg-black/50 border-white/20 text-white'}`}
+                      disabled={autoTagState === 'running' || autoTagState === 'paused'}
+                  >
+                      <option value={10}>10 个</option>
+                      <option value={20}>20 个</option>
+                      <option value={30}>30 个</option>
+                      <option value={50}>50 个</option>
+                      <option value={100}>100 个</option>
+                  </select>
+              </div>
+
+              {autoTagState === 'idle' || autoTagState === 'stopped' ? (
+                <Button 
+                    variant="primary" 
+                    onClick={handleStartAutoTag} 
+                    className={`w-full py-3 ${theme === 'light' ? '!bg-slate-800 hover:!bg-slate-700 !text-white !border-none' : ''}`}
+                >
+                   <div className="flex items-center justify-center gap-2">
+                       {autoTagTab === 'untagged' ? <Tag size={16} /> : <RefreshCw size={16} />}
+                       <span>{autoTagTab === 'untagged' ? '开始打标' : '开始重新打标'}</span>
+                   </div>
+                </Button>
+              ) : (
+                <div className="flex gap-4">
+                  <Button 
+                      variant="secondary" 
+                      onClick={autoTagState === 'paused' ? handleStartAutoTag : handlePauseAutoTag} 
+                      className={`flex-1 py-3 ${theme === 'light' ? 'border-amber-400 text-amber-600 hover:bg-amber-50 hover:border-amber-500' : 'border-yellow-500/30 text-yellow-500 hover:bg-yellow-500/10 hover:text-yellow-600'}`}
+                  >
+                     <div className="flex items-center justify-center gap-2">
+                         {autoTagState === 'paused' ? <RefreshCw size={16} /> : <div className="flex gap-0.5"><div className="w-1.5 h-3 bg-current rounded-sm"></div><div className="w-1.5 h-3 bg-current rounded-sm"></div></div>}
+                         <span>{autoTagState === 'paused' ? '继续' : '暂停'}</span>
+                     </div>
+                  </Button>
+                  <Button 
+                      variant="secondary" 
+                      onClick={handleStopAutoTag} 
+                      className={`flex-1 py-3 ${theme === 'light' ? 'border-rose-400 text-rose-600 hover:bg-rose-50 hover:border-rose-500' : 'border-red-500/30 text-red-500 hover:bg-red-500/10 hover:text-red-600'}`}
+                  >
+                     <div className="flex items-center justify-center gap-2">
+                         <Square size={14} className="fill-current" />
+                         <span>停止</span>
+                     </div>
+                  </Button>
+                </div>
+              )}
+
+            {/* Progress indicators */}
+            {autoTagQueue.length > 0 && (
+              <div className="mt-4 animate-in fade-in">
+                  <div className="flex justify-between text-xs mb-2 opacity-70 font-medium">
+                      <span>进度: {autoTagProgress.current} / {autoTagProgress.total}</span>
+                      <div className="flex gap-4">
+                         <span className="text-green-500 font-bold">成功: {autoTagProgress.success}</span>
+                         <span className="text-red-500 font-bold">失败: {autoTagProgress.fail}</span>
+                      </div>
+                  </div>
+                  {/* Progress Bar */}
+                  <div className={`h-1.5 w-full rounded-full overflow-hidden flex ${theme === 'light' ? 'bg-slate-200' : 'bg-white/10'}`}>
+                      <div className="h-full bg-blue-500 transition-all duration-300" style={{width: `${(autoTagProgress.success / autoTagProgress.total) * 100}%`}}></div>
+                      <div className="h-full bg-red-500 transition-all duration-300" style={{width: `${(autoTagProgress.fail / autoTagProgress.total) * 100}%`}}></div>
+                  </div>
+
+                  {/* Log items */}
+                  <div className="mt-4 pt-4 border-t border-white/10">
+                      <div 
+                         className="text-xs mb-3 font-bold opacity-70 flex items-center gap-1.5 cursor-pointer hover:opacity-100"
+                         onClick={() => setShowAutoTagLogs(!showAutoTagLogs)}
+                      >
+                         <ChevronDown size={14} className={`transition-transform ${showAutoTagLogs ? '' : '-rotate-90'}`}/> 
+                         处理日志 <span className="opacity-50 font-normal">({autoTagQueue[0]?.isRetag ? '重新打标' : '未打标'}队列)</span>
+                      </div>
+                      
+                      {showAutoTagLogs && (
+                          <div className="max-h-60 overflow-y-auto space-y-2 pr-2 custom-scrollbar animate-in fade-in slide-in-from-top-2">
+                             {autoTagQueue.map((item, idx) => (
+                                 <div key={item.char.id + idx} className={`flex flex-col p-3 rounded-xl border ${theme === 'light' ? 'bg-white border-slate-200' : 'bg-[#0f111a] border-white/5'} ${item.status === 'success' ? 'border-green-500/30 bg-green-500/5' : ''}`}>
+                                    <div className="flex justify-between items-center">
+                                        <div className="flex items-center gap-2">
+                                            {item.status === 'pending' && <div className="w-3.5 h-3.5 rounded-full border-2 border-slate-500/30"></div>}
+                                            {item.status === 'processing' && <RefreshCw size={14} className="animate-spin text-blue-500" />}
+                                            {item.status === 'review' && <Sparkles size={14} className="text-amber-500" />}
+                                            {item.status === 'success' && <Check size={14} className="text-green-500" />}
+                                            {item.status === 'fail' && <AlertTriangle size={14} className="text-red-500" />}
+                                            <span className={`font-bold text-sm truncate max-w-[120px] ${theme === 'light' ? 'text-slate-800' : 'text-slate-200'}`}>{item.char.name}</span>
+                                        </div>
+                                        <div>
+                                            {item.status === 'pending' && <span className="text-xs opacity-50">等待中</span>}
+                                            {item.status === 'processing' && <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-500 font-bold">处理中</span>}
+                                            {item.status === 'review' && <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-600 font-bold">待审核确认</span>}
+                                            {item.status === 'success' && <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/20 text-green-500 font-bold">已保存</span>}
+                                            {item.status === 'fail' && <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/20 text-red-500 font-bold">失败 {item.retries > 0 ? `(${item.retries})` : ''}</span>}
+                                        </div>
+                                    </div>
+                                    
+                                    {/* Review UI */}
+                                    {item.status === 'review' && item.generatedTags && (
+                                        <div className={`mt-3 p-3 rounded-lg flex flex-col gap-3 ${theme === 'light' ? 'bg-slate-50 border border-slate-200' : 'bg-black/20 border border-white/5'}`}>
+                                            <div className="flex items-stretch gap-2">
+                                                {/* Old */}
+                                                <div className={`flex-1 flex flex-col p-2 rounded border ${theme === 'light' ? 'bg-white border-slate-200' : 'bg-white/5 border-white/10'}`}>
+                                                    <div className="flex items-center gap-2 mb-2">
+                                                        <img src={item.char.avatarUrl} className="w-8 h-8 rounded-full object-cover" />
+                                                        <span className="text-xs font-bold opacity-70">旧标签</span>
+                                                    </div>
+                                                    <div className="flex flex-wrap gap-1 min-h-[24px]">
+                                                        {(!item.char.tags || item.char.tags.length === 0) && <span className="text-[10px] opacity-40">无</span>}
+                                                        {(item.char.tags || []).map((tag: string) => (
+                                                            <span key={tag} className="text-[10px] px-1.5 py-0 rounded bg-slate-500/10 border border-slate-500/20 opacity-80">{tag}</span>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                                {/* Arrow */}
+                                                <div className="flex flex-col justify-center items-center px-1 opacity-50">
+                                                    <ArrowRight size={14} />
+                                                </div>
+                                                {/* New */}
+                                                <div className={`flex-1 flex flex-col p-2 rounded border ${theme === 'light' ? 'bg-white border-blue-200' : 'bg-blue-900/20 border-blue-500/30'}`}>
+                                                    <div className="flex items-center gap-2 mb-2">
+                                                        <img src={item.char.avatarUrl} className="w-8 h-8 rounded-full object-cover" />
+                                                        <span className="text-xs font-bold text-blue-500">AI 生成</span>
+                                                    </div>
+                                                    <div className="flex flex-wrap gap-1 min-h-[24px]">
+                                                        {item.generatedTags.map((tag: string) => (
+                                                            <span key={tag} className="text-[10px] px-1.5 py-0 rounded bg-blue-500/10 text-blue-600 border border-blue-500/20">{tag}</span>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            
+                                            <div className="flex justify-end gap-2 mt-1">
+                                                <button 
+                                                    onClick={() => {
+                                                        const newQ = [...autoTagQueue];
+                                                        newQ[idx] = { ...item, status: 'fail', error: '用户已丢弃' };
+                                                        setAutoTagQueue(newQ);
+                                                        autoTagQueueRef.current = newQ;
+                                                        setAutoTagProgress(p => ({ ...p, current: p.current + 1, fail: p.fail + 1 }));
+                                                    }}
+                                                    className={`px-3 py-1.5 rounded flex items-center gap-1 text-[10px] font-bold transition-all ${theme === 'light' ? 'bg-slate-200/50 hover:bg-slate-200 text-slate-600' : 'bg-white/10 hover:bg-red-500/20 text-gray-400 hover:text-red-400'}`}
+                                                >
+                                                    <Trash2 size={12}/> 丢弃
+                                                </button>
+                                                <button 
+                                                    onClick={() => {
+                                                        const mergedTags = Array.from(new Set([...(item.char.tags || []), ...(item.generatedTags || [])]));
+                                                        onUpdate?.({ ...item.char, tags: mergedTags });
+                                                        const newQ = [...autoTagQueue];
+                                                        newQ[idx] = { ...item, status: 'success', generatedTags: mergedTags };
+                                                        setAutoTagQueue(newQ);
+                                                        autoTagQueueRef.current = newQ;
+                                                        setAutoTagProgress(p => ({ ...p, current: p.current + 1, success: p.success + 1 }));
+                                                    }}
+                                                    className={`px-3 py-1.5 rounded flex items-center gap-1 text-[10px] font-bold transition-all ${theme === 'light' ? 'bg-slate-200 hover:bg-slate-300 text-slate-700' : 'bg-white/10 hover:bg-white/20 text-gray-200'}`}
+                                                >
+                                                    <FolderPlus size={12}/> 合并旧标签
+                                                </button>
+                                                <button 
+                                                    onClick={() => {
+                                                        onUpdate?.({ ...item.char, tags: item.generatedTags });
+                                                        const newQ = [...autoTagQueue];
+                                                        newQ[idx] = { ...item, status: 'success' };
+                                                        setAutoTagQueue(newQ);
+                                                        autoTagQueueRef.current = newQ;
+                                                        setAutoTagProgress(p => ({ ...p, current: p.current + 1, success: p.success + 1 }));
+                                                    }}
+                                                    className="px-3 py-1.5 rounded flex items-center gap-1 text-[10px] font-bold text-white bg-blue-500 hover:bg-blue-600 transition-all shadow-sm"
+                                                >
+                                                    <Check size={12}/> 覆盖替换
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {item.status !== 'review' && item.generatedTags && item.generatedTags.length > 0 && (
+                                        <div className="flex flex-wrap gap-1 mt-2">
+                                            {item.generatedTags.map((tag: string) => (
+                                                <span key={tag} className="text-[9px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-500 border border-green-500/20">{tag}</span>
+                                            ))}
+                                        </div>
+                                    )}
+                                    {item.error && (
+                                        <div className="text-[10px] text-red-400 mt-1">{item.error}</div>
+                                    )}
+                                 </div>
+                             ))}
+                          </div>
+                      )}
+                  </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </Modal>
+
+      {/* Floating Auto Tag Mini Window */}
+      {!showAutoTagModal && autoTagQueue.length > 0 && autoTagState !== 'idle' && autoTagState !== 'stopped' && (
+          <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-[100] animate-in slide-in-from-top fade-in duration-300 rounded-2xl shadow-xl border px-4 py-3 min-w-[280px] flex flex-col gap-2 cursor-pointer transition-all hover:scale-105 ${theme === 'light' ? 'bg-white/95 border-slate-200 text-slate-800' : 'bg-slate-900/90 border-white/10 text-white backdrop-blur-md'}`}
+             onClick={() => setShowAutoTagModal(true)}
+          >
+              <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-2">
+                      <RefreshCw size={16} className={`text-blue-500 ${autoTagState === 'running' ? 'animate-spin' : ''}`} />
+                      <span className="font-bold text-sm">
+                          {autoTagState === 'running' ? '正在后台打标...' : '后台打标已暂停'}
+                      </span>
+                  </div>
+              </div>
+              <div className="flex justify-between items-center text-[10px] font-bold opacity-70">
+                  <span>进度: {autoTagProgress.current} / {autoTagProgress.total}</span>
+                  <div className="flex gap-2 text-green-500">
+                     <span>(成功: {autoTagProgress.success})</span>
+                  </div>
+              </div>
+          </div>
+      )}
 
       {/* Compare Modal (Diff Check) */}
       {compareModalOpen && selectedIds.size === 2 && (
@@ -1591,14 +2228,6 @@ const CharacterList: React.FC<CharacterListProps> = ({
                         className="w-32 h-48 object-cover rounded-xl shadow-lg shrink-0 bg-gray-900" 
                     />
                     <div className="flex-1 space-y-3 min-w-0">
-                        <div className="flex flex-wrap gap-2">
-                            {viewCharacter.tags?.map(tag => (
-                                <span key={tag} className={`px-2 py-1 rounded-md text-xs font-bold ${theme === 'light' ? 'bg-blue-100 text-blue-600' : 'bg-blue-500/20 text-blue-300'}`}>
-                                    # {tag}
-                                </span>
-                            ))}
-                        </div>
-                        
                         <div className={`text-sm ${theme === 'light' ? 'text-gray-600' : 'text-gray-400'}`}>
                             <div className="flex items-center gap-2 mb-1">
                                 <FileText size={14} />
@@ -1702,6 +2331,94 @@ const CharacterList: React.FC<CharacterListProps> = ({
             </div>
           </Modal>
       )}
+
+      {drawingCards.length > 0 && (
+          <TarotCardDraw 
+              characters={drawingCards} 
+              onComplete={() => setDrawingCards([])} 
+              onJump={(char) => {
+                 onSelect(char);
+                 setDrawingCards([]);
+              }}
+              onRedraw={() => {
+                 const randomChar = characters[Math.floor(Math.random() * characters.length)];
+                 setDrawingCards([randomChar]);
+              }}
+              theme={theme} 
+          />
+      )}
+
+      {/* AI Recommend Results Modal - Adapted for PC */}
+      {aiRecommendResults && (
+        <Modal
+            isOpen={true}
+            onClose={() => setAiRecommendResults(null)}
+            title="✨ AI 为您精选的档案"
+            theme={theme}
+            maxWidth="max-w-5xl"
+        >
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[70vh] overflow-y-auto pr-2 custom-scrollbar">
+                {aiRecommendResults.map((item, idx) => (
+                    <div key={item.char.id + idx} className={`flex flex-col gap-3 p-4 rounded-3xl border shadow-sm transition-all hover:shadow-md ${theme === 'light' ? 'bg-white border-slate-200' : 'bg-slate-800/80 border-white/10'}`}>
+                        <div className="flex gap-3">
+                            {/* Avatar */}
+                            <div className="w-20 lg:w-24 aspect-[4/5] relative rounded-2xl overflow-hidden shrink-0 group cursor-pointer" onClick={() => { onSelect(item.char); setAiRecommendResults(null); }}>
+                                <img src={item.char.avatarUrl || `https://picsum.photos/seed/${item.char.id}/400/400`} alt={item.char.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                    <span className="text-white font-bold text-[10px] bg-black/50 px-2 py-1 rounded-full flex items-center gap-1"><BookOpen size={12}/> 查看</span>
+                                </div>
+                            </div>
+
+                            {/* Info */}
+                            <div className="flex-1 flex flex-col min-w-0">
+                                <div className="flex justify-between items-start gap-1 mb-2">
+                                    <h3 className={`font-black text-lg truncate ${theme === 'light' ? 'text-slate-900' : 'text-white'}`}>{item.char.name}</h3>
+                                    <button
+                                        onClick={() => { onSelect(item.char); setAiRecommendResults(null); }}
+                                        className={`px-2 py-1 shrink-0 rounded-xl font-bold text-[10px] transition-colors flex items-center gap-1 ${theme === 'light' ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' : 'bg-white/10 text-white hover:bg-white/20'}`}
+                                    >
+                                        <ArrowRight size={12} />
+                                    </button>
+                                </div>
+                                <div className="flex flex-wrap gap-1 line-clamp-2">
+                                    {(item.char.tags || []).slice(0, 4).map((tag: string) => (
+                                        <span key={tag} className={`text-[9px] px-1.5 py-0.5 rounded-md font-medium ${theme === 'light' ? 'bg-blue-50 text-blue-700' : 'bg-blue-900/30 text-blue-400'}`}>
+                                            {tag}
+                                        </span>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Reason */}
+                        <div className={`mt-auto rounded-xl p-2.5 flex flex-col gap-1 ${theme === 'light' ? 'bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-100/50' : 'bg-gradient-to-br from-indigo-900/20 to-purple-900/20 border border-indigo-800/30'}`}>
+                            <div className="flex items-center gap-1.5">
+                                <Sparkles size={12} className={theme === 'light' ? 'text-indigo-600' : 'text-indigo-400'} />
+                                <span className={`font-bold text-[10px] ${theme === 'light' ? 'text-indigo-900' : 'text-indigo-200'}`}>推荐理由</span>
+                            </div>
+                            <p className={`text-[10px] leading-relaxed line-clamp-3 ${theme === 'light' ? 'text-indigo-900/80' : 'text-indigo-200/80'}`}>
+                                {item.reason}
+                            </p>
+                        </div>
+                    </div>
+                ))}
+                
+                {aiRecommendResults.length === 0 && (
+                    <div className={`col-span-1 md:col-span-2 lg:col-span-3 py-12 text-center rounded-3xl border ${theme === 'light' ? 'bg-slate-50 border-slate-200' : 'bg-slate-800/50 border-white/10'}`}>
+                       <p className={`font-bold ${theme === 'light' ? 'text-slate-500' : 'text-gray-400'}`}>没有找到合适的档案喔，换个说法试试吧！</p>
+                    </div>
+                )}
+            </div>
+        </Modal>
+      )}
+
+      {/* API Config Modal */}
+      <ApiConfigModal 
+        isOpen={showApiConfigModal}
+        onClose={() => setShowApiConfigModal(false)}
+        theme={theme}
+      />
+
     </div>
   );
 };
