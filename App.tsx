@@ -169,6 +169,11 @@ function App() {
     setCharacters(prev => prev.map(c => c.id === char.id ? char : c));
   };
 
+  const handleUpdateBatch = (chars: Character[]) => {
+    const charsMap = new Map(chars.map(c => [c.id, c]));
+    setCharacters(prev => prev.map(c => charsMap.has(c.id) ? charsMap.get(c.id)! : c));
+  };
+
   const handleDeleteCharacter = (id: string, skipConfirm = false) => {
     if (skipConfirm || window.confirm("确定要删除这个角色吗？")) {
       deleteImage(id).catch(err => console.error("Failed to delete image", err));
@@ -288,11 +293,13 @@ function App() {
               onImport={handleImportCharacter}
               onImportBatch={handleImportBatch}
               onUpdate={handleUpdateCharacter}
+              onUpdateBatch={handleUpdateBatch}
               folders={folders}
               onCreateFolder={handleCreateFolder}
               onDeleteFolder={handleDeleteFolder}
               onRenameFolder={handleRenameFolder}
               theme={theme}
+              isActive={view === 'list'}
             />
           </div>
 

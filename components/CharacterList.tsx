@@ -19,11 +19,13 @@ interface CharacterListProps {
   onImport: (char: Character) => void;
   onImportBatch?: (chars: Character[]) => void;
   onUpdate?: (char: Character) => void; // Add onUpdate prop
+  onUpdateBatch?: (chars: Character[]) => void;
   theme: Theme;
   folders?: string[]; // Optional for now as it seems unused in this version
   onCreateFolder?: (name: string) => void;
   onDeleteFolder?: (name: string) => void;
   onRenameFolder?: (oldName: string, newName: string) => void;
+  isActive?: boolean;
 }
 
 interface ImportResults {
@@ -43,11 +45,13 @@ const CharacterList: React.FC<CharacterListProps> = ({
   onImport,
   onImportBatch,
   onUpdate,
+  onUpdateBatch,
   theme,
   folders = [],
   onCreateFolder,
   onDeleteFolder,
-  onRenameFolder
+  onRenameFolder,
+  isActive = true
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -173,11 +177,14 @@ const CharacterList: React.FC<CharacterListProps> = ({
   const [showAutoTagLogs, setShowAutoTagLogs] = useState(true);
   const [drawingCards, setDrawingCards] = useState<any[]>([]);
   const [aiRecommendResults, setAiRecommendResults] = useState<{char: any, reason: string}[] | null>(null);
+  const [hideAiRecommendWidget, setHideAiRecommendWidget] = useState(false);
 
   const handleAIRecommend = async () => {
     if (!aiRecommendQuery.trim()) return;
     setAiRecommendLoading(true);
     setAiLogs([]);
+    setAiRecommendResults(null);
+    setHideAiRecommendWidget(false);
     
     const addLog = (text: string) => {
       const now = new Date();
@@ -192,8 +199,14 @@ const CharacterList: React.FC<CharacterListProps> = ({
       await new Promise(resolve => setTimeout(resolve, 800));
       addLog("正在向 AI 请求提取核心关键词...");
       
-      const results = await recommendCharacters(characters, aiRecommendQuery);
+      const response = await recommendCharacters(characters, aiRecommendQuery);
       
+      if (response.keywords && response.keywords.length > 0) {
+        addLog(`提取到关键词: [${response.keywords.join(', ')}]`);
+        await new Promise(resolve => setTimeout(resolve, 600));
+      }
+      
+      const results = response.results || [];
       addLog(`初步筛选出 ${results.length} 个候选角色，正在请求 AI 进行深度评估...`);
       await new Promise(resolve => setTimeout(resolve, 600));
       addLog("AI 评估完成！正在解析结果...");
@@ -211,14 +224,12 @@ const CharacterList: React.FC<CharacterListProps> = ({
         });
 
       setAiRecommendResults(recommendedCharacters);
-      setActiveFilter({ type: 'tag', value: '', recommendResults: results } as any);
-      setShowAIRecommendModal(false);
-      setAiLogs([]); // reset after completion if needed, or keep for next time
+      // Wait, let's reset aiRecommendLoading here so the background widget stops loading state.
+      setAiRecommendLoading(false);
     } catch (e) {
       console.error(e);
       addLog("❌ API 请求失败或处理出错");
       alert("AI推荐失败");
-    } finally {
       setAiRecommendLoading(false);
     }
   };
@@ -242,7 +253,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
     while (autoTagStateRef.current === 'running') {
       const queue = autoTagQueueRef.current;
       const pendingIndices = queue.map((q, idx) => ({q, idx}))
-        .filter(({q}) => q.status === 'pending' || (q.status === 'fail' && q.retries < 3))
+        .filter(({q}) => q.status === 'pending' || (q.status === 'fail' && q.retries < 5))
         .slice(0, 5)
         .map(x => x.idx);
 
@@ -285,7 +296,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
                  }
             } else {
                  newQ[idx] = { ...q, status: 'fail', error: "AI未返回结果可重试", retries: q.retries + 1 };
-                 if (newQ[idx].retries >= 3) failCount++;
+                 if (newQ[idx].retries >= 5) failCount++;
             }
         });
         
@@ -305,18 +316,18 @@ const CharacterList: React.FC<CharacterListProps> = ({
          pendingIndices.forEach(idx => {
              const q = newQ[idx];
              newQ[idx] = { ...q, status: 'fail', error: err.message || "请求失败", retries: q.retries + 1 };
-             if (newQ[idx].retries >= 3) failCount++;
+             if (newQ[idx].retries >= 5) failCount++;
          });
          
          autoTagQueueRef.current = newQ;
          setAutoTagQueue(newQ);
          
          setAutoTagProgress(p => ({ ...p, current: p.current + failCount, fail: p.fail + failCount }));
-         await new Promise(r => setTimeout(r, 2000));
+         await new Promise(r => setTimeout(r, 5000)); // Increase backoff on error
       }
       
       // Delay before next batch to respect rate limits
-      await new Promise(r => setTimeout(r, 1000));
+      await new Promise(r => setTimeout(r, 3000));
     }
   };
 
@@ -386,8 +397,13 @@ const CharacterList: React.FC<CharacterListProps> = ({
   const [dragOverCollection, setDragOverCollection] = useState<string | null>(null);
 
   const handleDragStart = (e: React.DragEvent, charId: string) => {
-      setDraggedCharId(charId);
-      e.dataTransfer.setData('text/plain', charId);
+      if (isSelectionMode && selectedIds.has(charId) && selectedIds.size > 1) {
+          setDraggedCharId(charId);
+          e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'multi', ids: Array.from(selectedIds) }));
+      } else {
+          setDraggedCharId(charId);
+          e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'single', id: charId }));
+      }
       e.dataTransfer.effectAllowed = 'copy';
   };
 
@@ -405,14 +421,33 @@ const CharacterList: React.FC<CharacterListProps> = ({
   const handleDrop = (e: React.DragEvent, collectionName: string) => {
       e.preventDefault();
       setDragOverCollection(null);
-      const charId = e.dataTransfer.getData('text/plain');
+      const dataStr = e.dataTransfer.getData('text/plain');
       
-      if (charId) {
-          const char = characters.find(c => c.id === charId);
-          if (char) {
-              if (char.folder !== collectionName) {
+      if (dataStr) {
+          try {
+              const data = JSON.parse(dataStr);
+              if (data.type === 'multi' && Array.isArray(data.ids)) {
+                  const charsToUpdate = characters
+                      .filter(c => data.ids.includes(c.id) && c.folder !== collectionName)
+                      .map(c => ({ ...c, folder: collectionName }));
+                  if (charsToUpdate.length > 0) {
+                      if (onUpdateBatch) {
+                          onUpdateBatch(charsToUpdate);
+                      } else {
+                          charsToUpdate.forEach(c => onUpdate?.(c));
+                      }
+                  }
+              } else if (data.type === 'single' && data.id) {
+                  const char = characters.find(c => c.id === data.id);
+                  if (char && char.folder !== collectionName) {
+                      onUpdate?.({ ...char, folder: collectionName });
+                  }
+              }
+          } catch (err) {
+              // Fallback to legacy string charId
+              const char = characters.find(c => c.id === dataStr);
+              if (char && char.folder !== collectionName) {
                   onUpdate?.({ ...char, folder: collectionName });
-                  // Optional: Show success feedback
               }
           }
       }
@@ -555,7 +590,9 @@ const CharacterList: React.FC<CharacterListProps> = ({
     // Sorting
     return [...result].sort((a, b) => {
         if (sortOption === 'updated-desc') {
-            return (b.updatedAt || b.importDate || 0) - (a.updatedAt || a.importDate || 0);
+            const timeA = Math.max(a.updatedAt || 0, a.fileLastModified || 0, a.importDate || 0);
+            const timeB = Math.max(b.updatedAt || 0, b.fileLastModified || 0, b.importDate || 0);
+            return timeB - timeA;
         } else if (sortOption === 'date-desc') {
             return (b.importDate || 0) - (a.importDate || 0);
         } else if (sortOption === 'date-asc') {
@@ -950,10 +987,10 @@ const CharacterList: React.FC<CharacterListProps> = ({
       
       contentMap.forEach((identicalChars) => {
         if (identicalChars.length > 1) {
-          // Sort by date descending (newest first)
+          // Sort by local modified date descending (newest first)
           const sorted = [...identicalChars].sort((a, b) => {
-            const timeA = a.importDate || Math.max(a.updatedAt || 0, a.fileLastModified || 0);
-            const timeB = b.importDate || Math.max(b.updatedAt || 0, b.fileLastModified || 0);
+            const timeA = Math.max(a.updatedAt || 0, a.fileLastModified || 0, a.importDate || 0);
+            const timeB = Math.max(b.updatedAt || 0, b.fileLastModified || 0, b.importDate || 0);
             return timeB - timeA;
           });
           // Keep sorted[0], mark rest for deletion
@@ -1246,35 +1283,30 @@ const CharacterList: React.FC<CharacterListProps> = ({
                 {showTagFilterModal && (
                     <div className={`absolute top-full mt-2 right-0 w-[400px] z-[150] rounded-2xl shadow-2xl border animate-in slide-in-from-top-4 fade-in duration-200 overflow-hidden ${theme === 'light' ? 'bg-white border-slate-200/50' : 'bg-gray-900 border-white/10'}`}>
                      <div className={`px-4 py-3 border-b flex justify-between items-center ${theme === 'light' ? 'border-slate-100 bg-slate-50/50' : 'border-white/10 bg-white/5'}`}>
-                         <span className="font-bold text-sm flex items-center gap-2">
+                         <span className={`font-bold text-sm flex items-center gap-2 ${theme === 'light' ? 'text-slate-700' : 'text-slate-200'}`}>
                              <Tag size={14} className="opacity-70" /> 标签筛选
                          </span>
-                         {tagFilterMode === 'view' ? (
+                         <div className="flex items-center gap-2">
+                             {activeFilter.type === 'tag' && activeFilter.value && (
+                                 <button 
+                                     onClick={() => setActiveFilter({ type: 'all' })}
+                                     className={`text-sm tracking-wide font-bold px-3 py-1.5 rounded transition-colors ${theme === 'light' ? 'text-slate-500 hover:bg-slate-200/50' : 'text-slate-400 hover:bg-white/5'}`}
+                                 >
+                                     清除选中
+                                 </button>
+                             )}
                              <button 
-                               onClick={() => setTagFilterMode('edit')}
-                               className={`text-[10px] uppercase font-bold px-2 py-1 rounded transition-colors ${theme === 'light' ? 'text-slate-500 hover:bg-slate-200' : 'text-gray-400 hover:bg-white/10'}`}
-                             >编辑标签</button>
-                         ) : (
-                             <button 
-                               onClick={() => setTagFilterMode('view')}
-                               className={`text-[10px] uppercase font-bold px-2 py-1 rounded transition-colors ${theme === 'light' ? 'bg-slate-800 text-white' : 'bg-white text-gray-900'}`}
-                             >完成编辑</button>
-                         )}
+                               onClick={() => setTagFilterMode(tagFilterMode === 'view' ? 'edit' : 'view')}
+                               className={`text-sm tracking-wide font-bold px-3 py-1.5 rounded transition-colors ${theme === 'light' ? 'text-slate-700 bg-slate-200/50 hover:bg-slate-200' : 'text-gray-200 bg-white/10 hover:bg-white/20'}`}
+                             >
+                               {tagFilterMode === 'view' ? '编辑标签' : '完成编辑'}
+                             </button>
+                         </div>
                      </div>
                      <div className="p-4 max-h-[400px] overflow-y-auto custom-scrollbar">
                         <div className="space-y-4">
                             {tagFilterMode === 'view' ? (
                                 <>
-                                    {activeFilter.type === 'tag' && activeFilter.value && (
-                                        <div className="flex justify-end">
-                                            <button 
-                                                onClick={() => setActiveFilter({ type: 'all' })}
-                                                className={`text-xs hover:underline pt-1 ${theme === 'light' ? 'text-slate-500' : 'text-gray-400'}`}
-                                            >
-                                                清空选中
-                                            </button>
-                                        </div>
-                                    )}
                                     <div className="flex flex-wrap gap-2">
                                         {allTags.map(tag => (
                                             <button
@@ -1685,83 +1717,153 @@ const CharacterList: React.FC<CharacterListProps> = ({
 
       {/* AI Recommend Modal */}
       <Modal
-        isOpen={showAIRecommendModal}
+        isOpen={isActive && showAIRecommendModal}
         onClose={() => setShowAIRecommendModal(false)}
         title="✨ AI 智能推荐"
         theme={theme}
+        maxWidth={aiRecommendResults ? "max-w-5xl" : "max-w-xl"}
       >
         <div className="space-y-6">
-          <div>
-            <p className="text-sm font-bold opacity-80 mb-2">你想玩怎样的剧情或角色？</p>
-            <div className={`relative rounded-xl border p-1 transition-colors ${theme === 'light' ? 'bg-white border-slate-200 focus-within:border-slate-800' : 'bg-black/20 border-white/10 focus-within:border-white/50'}`}>
-                <textarea
-                  rows={4}
-                  placeholder="例如: 我是主播，给我找个榜一大哥的卡..."
-                  value={aiRecommendQuery}
-                  onChange={(e) => setAiRecommendQuery(e.target.value)}
-                  className="w-full p-3 bg-transparent outline-none resize-none text-sm"
-                />
-            </div>
-          </div>
-          
-          <div className="flex items-center gap-2 text-xs font-bold opacity-60">
-              <Sparkles size={14} />
-              <p>不知道玩什么？试试随机抽卡！（不消耗 API）</p>
-          </div>
-
-          <div className="flex justify-between gap-4">
-            <Button 
-                variant="secondary" 
-                onClick={() => {
-                    const randomChar = characters[Math.floor(Math.random() * characters.length)];
-                    setDrawingCards([randomChar]);
-                    setShowAIRecommendModal(false);
-                }} 
-                className={`flex-1 py-4 !rounded-2xl ${theme === 'light' ? '!text-slate-700 !bg-slate-100 hover:!bg-slate-200 !border-slate-200' : ''}`}
-                disabled={aiRecommendLoading}
-            >
-                <div className="flex flex-col items-center gap-1">
-                    <Dices size={20} />
-                    <span>随机抽卡</span>
+          <div className={`${aiRecommendResults ? 'grid grid-cols-1 lg:grid-cols-3 gap-6' : ''}`}>
+            {/* Left/Top side: Input and Logs */}
+            <div className={`space-y-6 ${aiRecommendResults ? 'lg:col-span-1 border-r border-[#ffffff10] pr-6' : ''}`}>
+               <div>
+                  <p className="text-sm font-bold opacity-80 mb-2">你想玩怎样的剧情或角色？</p>
+                  <div className={`relative rounded-xl border p-1 transition-colors ${theme === 'light' ? 'bg-white border-slate-200 focus-within:border-slate-800' : 'bg-black/20 border-white/10 focus-within:border-white/50'}`}>
+                      <textarea
+                        rows={4}
+                        placeholder="例如: 我是主播，给我找个榜一大哥的卡..."
+                        value={aiRecommendQuery}
+                        onChange={(e) => setAiRecommendQuery(e.target.value)}
+                        className="w-full p-3 bg-transparent outline-none resize-none text-sm custom-scrollbar"
+                      />
+                  </div>
                 </div>
-            </Button>
-            <Button 
-                variant="primary" 
-                onClick={handleAIRecommend} 
-                disabled={aiRecommendLoading}
-                className={`flex-1 py-4 !rounded-2xl shadow-lg ${theme === 'light' ? '!bg-slate-800 hover:!bg-slate-700 !text-white !border-none shadow-slate-800/20' : 'shadow-black/50'}`}
-            >
-               <div className="flex flex-col items-center gap-1">
-                   {aiRecommendLoading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Sparkles size={20} />}
-                   <span>{aiRecommendLoading ? '处理中...' : '开始推荐'}</span>
+                
+                <div className="flex items-center gap-2 text-xs font-bold opacity-60">
+                    <Sparkles size={14} />
+                    <p>不知道玩什么？试试随机抽卡！（不消耗 API）</p>
+                </div>
+
+                <div className="flex justify-between gap-4 flex-wrap pb-4">
+                  <Button 
+                      variant="secondary" 
+                      onClick={() => {
+                          const randomChar = characters[Math.floor(Math.random() * characters.length)];
+                          setDrawingCards([randomChar]);
+                          setShowAIRecommendModal(false);
+                      }} 
+                      className={`flex-1 min-w-[120px] py-4 !rounded-2xl ${theme === 'light' ? '!text-slate-700 !bg-slate-100 hover:!bg-slate-200 !border-slate-200' : ''}`}
+                      disabled={aiRecommendLoading}
+                  >
+                      <div className="flex flex-col items-center gap-1">
+                          <Dices size={20} />
+                          <span>随机抽卡</span>
+                      </div>
+                  </Button>
+                  <Button 
+                      variant="primary" 
+                      onClick={() => {
+                          handleAIRecommend();
+                      }} 
+                      disabled={aiRecommendLoading}
+                      className={`flex-1 min-w-[120px] py-4 !rounded-2xl shadow-lg ${theme === 'light' ? '!bg-slate-800 hover:!bg-slate-700 !text-white !border-none shadow-slate-800/20' : 'shadow-black/50'}`}
+                  >
+                     <div className="flex flex-col items-center gap-1">
+                         {aiRecommendLoading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Sparkles size={20} />}
+                         <span>{aiRecommendLoading ? '处理中...' : '开始推荐'}</span>
+                     </div>
+                  </Button>
+                </div>
+
+                {/* AI Logs */}
+                {(aiLogs.length > 0 || aiRecommendLoading) && (
+                  <div className={`mt-4 rounded-xl border p-4 font-mono text-xs shadow-inner ${theme === 'light' ? 'bg-[#0f111a] border-slate-800 text-teal-400' : 'bg-[#0a0a0c] border-white/10 text-teal-500'}`}>
+                      <div className="flex items-center gap-2 mb-3 text-gray-500 border-b border-gray-800 pb-2">
+                          <span>{'>_ AI 思维链 (CHAIN OF THOUGHT)'}</span>
+                      </div>
+                      <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar">
+                          {aiLogs.map((log, idx) => (
+                              <div key={idx} className="flex items-start gap-2 animate-in fade-in slide-in-from-bottom-1">
+                                  <span className="opacity-50 shrink-0">{log.time}</span>
+                                  <span className="break-all">{log.text}</span>
+                              </div>
+                          ))}
+                          {aiRecommendLoading && (
+                              <div className="flex items-start gap-2 animate-pulse mt-2 opacity-70">
+                                  <span className="shrink-0">[{new Date().getHours().toString().padStart(2, '0')}:{new Date().getMinutes().toString().padStart(2, '0')}:{new Date().getSeconds().toString().padStart(2, '0')}]</span>
+                                  <span className="flex items-center gap-1">
+                                      <RefreshCw className="animate-spin" size={12} /> 正在处理中...
+                                  </span>
+                              </div>
+                          )}
+                      </div>
+                  </div>
+                )}
+            </div>
+
+            {/* Right side: Results */}
+            {aiRecommendResults && !aiRecommendLoading && (
+               <div className="lg:col-span-2 pt-6 lg:pt-0">
+                  <div className="flex items-center justify-between mb-4 border-b pb-2 opacity-80 border-white/10">
+                    <h3 className="font-bold flex items-center gap-2 text-sm"><CheckSquare size={16} /> 精选档案结果 ({aiRecommendResults.length})</h3>
+                  </div>
+                  
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 max-h-[50vh] overflow-y-auto pr-2 custom-scrollbar">
+                      {aiRecommendResults.map((item, idx) => (
+                          <div key={item.char.id + idx} className={`flex flex-col gap-3 p-4 rounded-3xl border shadow-sm transition-all hover:shadow-md ${theme === 'light' ? 'bg-white border-slate-200' : 'bg-slate-800/80 border-white/10'}`}>
+                              <div className="flex gap-3">
+                                  {/* Avatar */}
+                                  <div className="w-20 lg:w-24 aspect-[4/5] relative rounded-2xl overflow-hidden shrink-0 group cursor-pointer" onClick={() => { onSelect(item.char); }}>
+                                      <img src={item.char.avatarUrl || `https://picsum.photos/seed/${item.char.id}/400/400`} alt={item.char.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                          <span className="text-white font-bold text-[10px] bg-black/50 px-2 py-1 rounded-full flex items-center gap-1"><BookOpen size={12}/> 查看</span>
+                                      </div>
+                                  </div>
+
+                                  {/* Info */}
+                                  <div className="flex-1 flex flex-col min-w-0">
+                                      <div className="flex justify-between items-start gap-1 mb-2">
+                                          <h3 className={`font-black text-lg truncate ${theme === 'light' ? 'text-slate-900' : 'text-white'}`}>{item.char.name}</h3>
+                                          <button
+                                              onClick={() => { onSelect(item.char); }}
+                                              className={`px-3 py-1.5 shrink-0 rounded-xl font-bold text-xs transition-colors flex items-center gap-1.5 ${theme === 'light' ? 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100' : 'bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30'}`}
+                                          >
+                                              查看详情 <ArrowRight size={14} />
+                                          </button>
+                                      </div>
+                                      <div className="flex flex-wrap gap-1 line-clamp-2">
+                                          {(item.char.tags || []).slice(0, 4).map((tag: string) => (
+                                              <span key={tag} className={`text-[9px] px-1.5 py-0.5 rounded-md font-medium ${theme === 'light' ? 'bg-blue-50 text-blue-700' : 'bg-blue-900/30 text-blue-400'}`}>
+                                                  {tag}
+                                              </span>
+                                          ))}
+                                      </div>
+                                  </div>
+                              </div>
+
+                              {/* Reason */}
+                              <div className={`mt-auto rounded-xl p-2.5 flex flex-col gap-1 ${theme === 'light' ? 'bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-100/50' : 'bg-gradient-to-br from-indigo-900/20 to-purple-900/20 border border-indigo-800/30'}`}>
+                                  <div className="flex items-center gap-1.5">
+                                      <Sparkles size={12} className={theme === 'light' ? 'text-indigo-600' : 'text-indigo-400'} />
+                                      <span className={`font-bold text-[10px] ${theme === 'light' ? 'text-indigo-900' : 'text-indigo-200'}`}>推荐理由</span>
+                                  </div>
+                                  <p className={`text-[10px] leading-relaxed line-clamp-3 ${theme === 'light' ? 'text-indigo-900/80' : 'text-indigo-200/80'}`}>
+                                      {item.reason}
+                                  </p>
+                              </div>
+                          </div>
+                      ))}
+                      
+                      {aiRecommendResults.length === 0 && (
+                          <div className={`col-span-1 lg:col-span-2 py-12 text-center rounded-3xl border ${theme === 'light' ? 'bg-slate-50 border-slate-200' : 'bg-slate-800/50 border-white/10'}`}>
+                             <p className={`font-bold ${theme === 'light' ? 'text-slate-500' : 'text-gray-400'}`}>没有找到合适的档案喔，换个说法试试吧！</p>
+                          </div>
+                      )}
+                  </div>
                </div>
-            </Button>
+            )}
           </div>
-
-          {/* AI Logs */}
-          {(aiLogs.length > 0 || aiRecommendLoading) && (
-            <div className={`mt-4 rounded-xl border p-4 font-mono text-xs shadow-inner ${theme === 'light' ? 'bg-[#0f111a] border-slate-800 text-teal-400' : 'bg-[#0a0a0c] border-white/10 text-teal-500'}`}>
-                <div className="flex items-center gap-2 mb-3 text-gray-500 border-b border-gray-800 pb-2">
-                    <span>{'>_ AI 思维链 (CHAIN OF THOUGHT)'}</span>
-                </div>
-                <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar">
-                    {aiLogs.map((log, idx) => (
-                        <div key={idx} className="flex items-start gap-2 animate-in fade-in slide-in-from-bottom-1">
-                            <span className="opacity-50 shrink-0">{log.time}</span>
-                            <span className="break-all">{log.text}</span>
-                        </div>
-                    ))}
-                    {aiRecommendLoading && (
-                        <div className="flex items-start gap-2 animate-pulse mt-2 opacity-70">
-                            <span className="shrink-0">[{new Date().getHours().toString().padStart(2, '0')}:{new Date().getMinutes().toString().padStart(2, '0')}:{new Date().getSeconds().toString().padStart(2, '0')}]</span>
-                            <span className="flex items-center gap-1">
-                                <RefreshCw className="animate-spin" size={12} /> 正在处理中...
-                            </span>
-                        </div>
-                    )}
-                </div>
-            </div>
-          )}
         </div>
       </Modal>
 
@@ -1868,6 +1970,55 @@ const CharacterList: React.FC<CharacterListProps> = ({
                       <div className="h-full bg-red-500 transition-all duration-300" style={{width: `${(autoTagProgress.fail / autoTagProgress.total) * 100}%`}}></div>
                   </div>
 
+                  {/* Log items */}
+                  <div className="mt-4 pt-4 border-t border-white/10">
+                      <div 
+                         className="text-xs mb-3 font-bold opacity-70 flex items-center gap-1.5 cursor-pointer hover:opacity-100"
+                         onClick={() => setShowAutoTagLogs(!showAutoTagLogs)}
+                      >
+                         <ChevronDown size={14} className={`transition-transform ${showAutoTagLogs ? '' : '-rotate-90'}`}/> 
+                         处理日志 <span className="opacity-50 font-normal">({autoTagQueue[0]?.isRetag ? '重新打标' : '未打标'}队列)</span>
+                      </div>
+                      
+                      {showAutoTagLogs && (
+                          <div className="max-h-60 overflow-y-auto space-y-2 pr-2 custom-scrollbar animate-in fade-in slide-in-from-top-2">
+                             {autoTagQueue.map((item, idx) => {
+                                 if (item.status === 'review') return null; // Exclude review items from logs to avoid duplication/clutter
+
+                                 return (
+                                 <div key={item.char.id + idx} className={`flex flex-col p-3 rounded-xl border ${theme === 'light' ? 'bg-white border-slate-200' : 'bg-[#0f111a] border-white/5'} ${item.status === 'success' ? 'border-green-500/30 bg-green-500/5' : ''}`}>
+                                    <div className="flex justify-between items-center">
+                                        <div className="flex items-center gap-2">
+                                            {item.status === 'pending' && <div className="w-3.5 h-3.5 rounded-full border-2 border-slate-500/30"></div>}
+                                            {item.status === 'processing' && <RefreshCw size={14} className="animate-spin text-blue-500" />}
+                                            {item.status === 'success' && <Check size={14} className="text-green-500" />}
+                                            {item.status === 'fail' && <AlertTriangle size={14} className="text-red-500" />}
+                                            <span className={`font-bold text-sm truncate max-w-[120px] ${theme === 'light' ? 'text-slate-800' : 'text-slate-200'}`}>{item.char.name}</span>
+                                        </div>
+                                        <div>
+                                            {item.status === 'pending' && <span className="text-xs opacity-50">等待中</span>}
+                                            {item.status === 'processing' && <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-500 font-bold">处理中</span>}
+                                            {item.status === 'success' && <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/20 text-green-500 font-bold">已保存</span>}
+                                            {item.status === 'fail' && <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/20 text-red-500 font-bold">失败 {item.retries > 0 ? `(${item.retries})` : ''}</span>}
+                                        </div>
+                                    </div>
+
+                                    {item.status !== 'review' && item.generatedTags && item.generatedTags.length > 0 && (
+                                        <div className="flex flex-wrap gap-1 mt-2">
+                                            {item.generatedTags.map((tag: string) => (
+                                                <span key={tag} className="text-[9px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-500 border border-green-500/20">{tag}</span>
+                                            ))}
+                                        </div>
+                                    )}
+                                    {item.error && (
+                                        <div className="text-[10px] text-red-400 mt-1">{item.error}</div>
+                                    )}
+                                 </div>
+                             )})}
+                          </div>
+                      )}
+                  </div>
+
                   {/* Tag Replacement UI (Separated from logs) */}
                   {autoTagQueue.some(i => i.status === 'review') && (
                       <div className="mt-4 pt-4 border-t border-white/10">
@@ -1883,19 +2034,17 @@ const CharacterList: React.FC<CharacterListProps> = ({
                                           let updated = 0;
                                           newQ.forEach((item, idx) => {
                                               if (item.status === 'review') {
-                                                  const mergedTags = Array.from(new Set([...(item.char.tags || []), ...(item.generatedTags || [])]));
-                                                  onUpdate?.({ ...item.char, tags: mergedTags });
-                                                  newQ[idx] = { ...item, status: 'success', generatedTags: mergedTags };
+                                                  newQ[idx] = { ...item, status: 'fail', error: '批量拒绝' };
                                                   updated++;
                                               }
                                           });
                                           setAutoTagQueue(newQ);
                                           autoTagQueueRef.current = newQ;
-                                          setAutoTagProgress(p => ({ ...p, current: p.current + updated, success: p.success + updated }));
+                                          setAutoTagProgress(p => ({ ...p, current: p.current + updated, fail: p.fail + updated }));
                                       }}
-                                      className={`px-3 py-1.5 rounded flex items-center gap-1 text-[10px] font-bold transition-all ${theme === 'light' ? 'bg-slate-200 hover:bg-slate-300 text-slate-700' : 'bg-white/10 hover:bg-white/20 text-gray-200'}`}
+                                      className={`px-2 py-1.5 rounded flex items-center gap-1 text-[10px] font-bold transition-all ${theme === 'light' ? 'bg-red-50 hover:bg-red-100 text-red-600 border border-red-200' : 'bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20'}`}
                                   >
-                                      <FolderPlus size={12}/> 全部合并旧标签
+                                      <Trash2 size={12}/> 全部拒绝
                                   </button>
                                   <button
                                       onClick={() => {
@@ -1912,9 +2061,29 @@ const CharacterList: React.FC<CharacterListProps> = ({
                                           autoTagQueueRef.current = newQ;
                                           setAutoTagProgress(p => ({ ...p, current: p.current + updated, success: p.success + updated }));
                                       }}
-                                      className="px-3 py-1.5 rounded flex items-center gap-1 text-[10px] font-bold text-white bg-blue-500 hover:bg-blue-600 transition-all shadow-sm"
+                                      className="px-2 py-1.5 rounded flex items-center gap-1 text-[10px] font-bold text-white bg-blue-500 hover:bg-blue-600 transition-all shadow-sm"
                                   >
-                                      <Check size={12}/> 全部覆盖替换
+                                      <Check size={12}/> 全部覆盖
+                                  </button>
+                                  <button
+                                      onClick={() => {
+                                          const newQ = [...autoTagQueue];
+                                          let updated = 0;
+                                          newQ.forEach((item, idx) => {
+                                              if (item.status === 'review') {
+                                                  const mergedTags = Array.from(new Set([...(item.char.tags || []), ...(item.generatedTags || [])]));
+                                                  onUpdate?.({ ...item.char, tags: mergedTags });
+                                                  newQ[idx] = { ...item, status: 'success', generatedTags: mergedTags };
+                                                  updated++;
+                                              }
+                                          });
+                                          setAutoTagQueue(newQ);
+                                          autoTagQueueRef.current = newQ;
+                                          setAutoTagProgress(p => ({ ...p, current: p.current + updated, success: p.success + updated }));
+                                      }}
+                                      className={`px-2 py-1.5 rounded flex items-center gap-1 text-[10px] font-bold transition-all ${theme === 'light' ? 'bg-slate-200 hover:bg-slate-300 text-slate-700' : 'bg-white/10 hover:bg-white/20 text-gray-200'}`}
+                                  >
+                                      <FolderPlus size={12}/> 全部合并
                                   </button>
                               </div>
                           </div>
@@ -1954,37 +2123,49 @@ const CharacterList: React.FC<CharacterListProps> = ({
                                           </div>
                                           <div className="flex flex-col gap-3">
                                               {/* Old */}
-                                              <div className={`flex flex-col p-3 rounded-xl border ${theme === 'light' ? 'bg-white border-slate-200' : 'bg-white/5 border-white/10'}`}>
+                                              <div className={`flex flex-col p-3 rounded-xl border ${theme === 'light' ? 'bg-white border-slate-200' : 'bg-[#151720] border-white/5'}`}>
                                                   <div className="flex items-center gap-2 mb-2">
                                                       <span className="text-sm font-bold opacity-70">旧标签</span>
                                                   </div>
                                                   <div className="flex flex-wrap gap-1.5 min-h-[32px] items-center">
                                                       {(!item.char.tags || item.char.tags.length === 0) && <span className="text-xs opacity-40 py-1">无</span>}
-                                                      {(item.char.tags || []).map((tag: string) => (
-                                                          <span key={tag} className="flex items-center gap-1 text-xs pl-2 pr-1 py-1 rounded bg-slate-500/10 border border-slate-500/20 opacity-80 group">
+                                                      {(item.char.tags || []).map((tag: string) => {
+                                                          const isDuplicate = item.generatedTags?.includes(tag);
+                                                          return (
+                                                          <span key={tag} className={`flex items-center gap-1 text-xs pl-2 pr-1 py-1 rounded border group transition-colors ${
+                                                              isDuplicate 
+                                                                ? (theme === 'light' ? 'bg-blue-600 text-white border-blue-700 shadow-sm' : 'bg-blue-600/60 text-white border-blue-400 font-bold') 
+                                                                : (theme === 'light' ? 'bg-slate-100 border-slate-200 text-slate-600' : 'bg-slate-500/10 border-slate-500/20 opacity-70')
+                                                          }`}>
                                                               {tag}
-                                                              <button onClick={() => removeOldTag(tag)} className="opacity-40 hover:opacity-100 hover:text-red-500 transition-colors ml-1 p-0.5 rounded hover:bg-slate-500/20">
+                                                              <button onClick={() => removeOldTag(tag)} className={`opacity-60 hover:opacity-100 transition-colors ml-1 p-0.5 rounded ${isDuplicate ? 'hover:bg-black/20 hover:text-white text-white/80' : 'hover:bg-slate-500/20 hover:text-red-500'}`}>
                                                                   <X size={12} />
                                                               </button>
                                                           </span>
-                                                      ))}
+                                                      )})}
                                                   </div>
                                               </div>
                                               
                                               {/* New */}
-                                              <div className={`flex flex-col p-3 rounded-xl border ${theme === 'light' ? 'bg-white border-blue-200 shadow-sm' : 'bg-blue-900/20 border-blue-500/30'}`}>
+                                              <div className={`flex flex-col p-3 rounded-xl border ${theme === 'light' ? 'bg-[#f8fafc] border-blue-200 shadow-sm' : 'bg-blue-900/10 border-blue-500/30'}`}>
                                                   <div className="flex items-center gap-2 mb-2">
                                                       <span className="text-sm font-bold text-blue-500">AI 生成新标签</span>
                                                   </div>
                                                   <div className="flex flex-wrap gap-1.5 min-h-[32px] items-center">
-                                                      {item.generatedTags?.map((tag: string) => (
-                                                          <span key={tag} className="flex items-center gap-1 text-xs pl-2 pr-1 py-1 rounded bg-blue-500/10 text-blue-600 border border-blue-500/20 group">
+                                                      {(item.generatedTags || []).map((tag: string) => {
+                                                          const isDuplicate = (item.char.tags || []).includes(tag);
+                                                          return (
+                                                          <span key={tag} className={`flex items-center gap-1 text-xs pl-2 pr-1 py-1 rounded border group transition-colors ${
+                                                              isDuplicate 
+                                                                ? (theme === 'light' ? 'bg-blue-600 text-white border-blue-700 shadow-sm' : 'bg-blue-600/60 text-white border-blue-400 font-bold') 
+                                                                : (theme === 'light' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-blue-500/10 text-blue-400 border-blue-500/20')
+                                                          }`}>
                                                               {tag}
-                                                              <button onClick={() => removeNewTag(tag)} className="opacity-50 hover:opacity-100 hover:text-red-500 transition-colors ml-1 p-0.5 rounded hover:bg-blue-500/20">
+                                                              <button onClick={() => removeNewTag(tag)} className={`opacity-60 hover:opacity-100 transition-colors ml-1 p-0.5 rounded ${isDuplicate ? 'hover:bg-black/20 hover:text-white text-white/80' : 'hover:bg-blue-500/20 hover:text-red-500 text-blue-500/80'}`}>
                                                                   <X size={12} />
                                                               </button>
                                                           </span>
-                                                      ))}
+                                                      )})}
                                                   </div>
                                               </div>
                                           </div>
@@ -2036,55 +2217,6 @@ const CharacterList: React.FC<CharacterListProps> = ({
                           </div>
                       </div>
                   )}
-
-                  {/* Log items */}
-                  <div className="mt-4 pt-4 border-t border-white/10">
-                      <div 
-                         className="text-xs mb-3 font-bold opacity-70 flex items-center gap-1.5 cursor-pointer hover:opacity-100"
-                         onClick={() => setShowAutoTagLogs(!showAutoTagLogs)}
-                      >
-                         <ChevronDown size={14} className={`transition-transform ${showAutoTagLogs ? '' : '-rotate-90'}`}/> 
-                         处理日志 <span className="opacity-50 font-normal">({autoTagQueue[0]?.isRetag ? '重新打标' : '未打标'}队列)</span>
-                      </div>
-                      
-                      {showAutoTagLogs && (
-                          <div className="max-h-60 overflow-y-auto space-y-2 pr-2 custom-scrollbar animate-in fade-in slide-in-from-top-2">
-                             {autoTagQueue.map((item, idx) => {
-                                 if (item.status === 'review') return null; // Exclude review items from logs to avoid duplication/clutter
-
-                                 return (
-                                 <div key={item.char.id + idx} className={`flex flex-col p-3 rounded-xl border ${theme === 'light' ? 'bg-white border-slate-200' : 'bg-[#0f111a] border-white/5'} ${item.status === 'success' ? 'border-green-500/30 bg-green-500/5' : ''}`}>
-                                    <div className="flex justify-between items-center">
-                                        <div className="flex items-center gap-2">
-                                            {item.status === 'pending' && <div className="w-3.5 h-3.5 rounded-full border-2 border-slate-500/30"></div>}
-                                            {item.status === 'processing' && <RefreshCw size={14} className="animate-spin text-blue-500" />}
-                                            {item.status === 'success' && <Check size={14} className="text-green-500" />}
-                                            {item.status === 'fail' && <AlertTriangle size={14} className="text-red-500" />}
-                                            <span className={`font-bold text-sm truncate max-w-[120px] ${theme === 'light' ? 'text-slate-800' : 'text-slate-200'}`}>{item.char.name}</span>
-                                        </div>
-                                        <div>
-                                            {item.status === 'pending' && <span className="text-xs opacity-50">等待中</span>}
-                                            {item.status === 'processing' && <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-500 font-bold">处理中</span>}
-                                            {item.status === 'success' && <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/20 text-green-500 font-bold">已保存</span>}
-                                            {item.status === 'fail' && <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/20 text-red-500 font-bold">失败 {item.retries > 0 ? `(${item.retries})` : ''}</span>}
-                                        </div>
-                                    </div>
-
-                                    {item.status !== 'review' && item.generatedTags && item.generatedTags.length > 0 && (
-                                        <div className="flex flex-wrap gap-1 mt-2">
-                                            {item.generatedTags.map((tag: string) => (
-                                                <span key={tag} className="text-[9px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-500 border border-green-500/20">{tag}</span>
-                                            ))}
-                                        </div>
-                                    )}
-                                    {item.error && (
-                                        <div className="text-[10px] text-red-400 mt-1">{item.error}</div>
-                                    )}
-                                 </div>
-                             )})}
-                          </div>
-                      )}
-                  </div>
               </div>
             )}
           </div>
@@ -2110,6 +2242,37 @@ const CharacterList: React.FC<CharacterListProps> = ({
                      <span>(成功: {autoTagProgress.success})</span>
                   </div>
               </div>
+          </div>
+      )}
+
+      {/* AI Recommend Background Widget */}
+      {!showAIRecommendModal && !hideAiRecommendWidget && (aiRecommendLoading || aiRecommendResults) && isActive && (
+          <div className={`fixed top-20 left-1/2 -translate-x-1/2 z-[100] animate-in slide-in-from-top fade-in duration-300 rounded-2xl shadow-xl border p-3 flex items-center gap-4 cursor-pointer transition-all hover:scale-105 hover:shadow-2xl ${theme === 'light' ? 'bg-white/95 border-slate-200 text-slate-800' : 'bg-slate-900/95 border-indigo-500/30 text-white backdrop-blur-xl shadow-indigo-900/20'}`}
+             onClick={() => setShowAIRecommendModal(true)}
+          >
+              <div className={`p-2 rounded-xl ${theme === 'light' ? 'bg-indigo-50 text-indigo-600' : 'bg-indigo-500/20 text-indigo-400'}`}>
+                  {aiRecommendLoading ? <RefreshCw size={20} className="animate-spin" /> : <Sparkles size={20} />}
+              </div>
+              <div className="flex flex-col pr-4">
+                  <span className={`font-bold text-sm ${theme === 'light' ? 'text-indigo-900' : 'text-indigo-100'}`}>
+                      {aiRecommendLoading ? 'AI 正在后台为您精选...' : '✨ AI 精选推荐已完成'}
+                  </span>
+                  <span className="text-xs opacity-70 mt-0.5">
+                      {aiRecommendLoading ? '您可以继续浏览其他页面' : `共为您找到 ${aiRecommendResults?.length || 0} 个结果，点击查看`}
+                  </span>
+              </div>
+              {!aiRecommendLoading && (
+                  <button 
+                      onClick={(e) => { 
+                          e.stopPropagation(); 
+                          setHideAiRecommendWidget(true); 
+                      }} 
+                      className={`absolute top-2 right-2 p-1 rounded-md opacity-40 hover:opacity-100 transition-opacity ${theme === 'light' ? 'hover:bg-slate-100 text-slate-500' : 'hover:bg-white/10 text-white'}`}
+                      title="关闭悬浮窗"
+                  >
+                      <X size={14} />
+                  </button>
+              )}
           </div>
       )}
 
@@ -2437,70 +2600,6 @@ const CharacterList: React.FC<CharacterListProps> = ({
               }}
               theme={theme} 
           />
-      )}
-
-      {/* AI Recommend Results Modal - Adapted for PC */}
-      {aiRecommendResults && (
-        <Modal
-            isOpen={true}
-            onClose={() => setAiRecommendResults(null)}
-            title="✨ AI 为您精选的档案"
-            theme={theme}
-            maxWidth="max-w-5xl"
-        >
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[70vh] overflow-y-auto pr-2 custom-scrollbar">
-                {aiRecommendResults.map((item, idx) => (
-                    <div key={item.char.id + idx} className={`flex flex-col gap-3 p-4 rounded-3xl border shadow-sm transition-all hover:shadow-md ${theme === 'light' ? 'bg-white border-slate-200' : 'bg-slate-800/80 border-white/10'}`}>
-                        <div className="flex gap-3">
-                            {/* Avatar */}
-                            <div className="w-20 lg:w-24 aspect-[4/5] relative rounded-2xl overflow-hidden shrink-0 group cursor-pointer" onClick={() => { onSelect(item.char); setAiRecommendResults(null); }}>
-                                <img src={item.char.avatarUrl || `https://picsum.photos/seed/${item.char.id}/400/400`} alt={item.char.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                    <span className="text-white font-bold text-[10px] bg-black/50 px-2 py-1 rounded-full flex items-center gap-1"><BookOpen size={12}/> 查看</span>
-                                </div>
-                            </div>
-
-                            {/* Info */}
-                            <div className="flex-1 flex flex-col min-w-0">
-                                <div className="flex justify-between items-start gap-1 mb-2">
-                                    <h3 className={`font-black text-lg truncate ${theme === 'light' ? 'text-slate-900' : 'text-white'}`}>{item.char.name}</h3>
-                                    <button
-                                        onClick={() => { onSelect(item.char); setAiRecommendResults(null); }}
-                                        className={`px-2 py-1 shrink-0 rounded-xl font-bold text-[10px] transition-colors flex items-center gap-1 ${theme === 'light' ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' : 'bg-white/10 text-white hover:bg-white/20'}`}
-                                    >
-                                        <ArrowRight size={12} />
-                                    </button>
-                                </div>
-                                <div className="flex flex-wrap gap-1 line-clamp-2">
-                                    {(item.char.tags || []).slice(0, 4).map((tag: string) => (
-                                        <span key={tag} className={`text-[9px] px-1.5 py-0.5 rounded-md font-medium ${theme === 'light' ? 'bg-blue-50 text-blue-700' : 'bg-blue-900/30 text-blue-400'}`}>
-                                            {tag}
-                                        </span>
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Reason */}
-                        <div className={`mt-auto rounded-xl p-2.5 flex flex-col gap-1 ${theme === 'light' ? 'bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-100/50' : 'bg-gradient-to-br from-indigo-900/20 to-purple-900/20 border border-indigo-800/30'}`}>
-                            <div className="flex items-center gap-1.5">
-                                <Sparkles size={12} className={theme === 'light' ? 'text-indigo-600' : 'text-indigo-400'} />
-                                <span className={`font-bold text-[10px] ${theme === 'light' ? 'text-indigo-900' : 'text-indigo-200'}`}>推荐理由</span>
-                            </div>
-                            <p className={`text-[10px] leading-relaxed line-clamp-3 ${theme === 'light' ? 'text-indigo-900/80' : 'text-indigo-200/80'}`}>
-                                {item.reason}
-                            </p>
-                        </div>
-                    </div>
-                ))}
-                
-                {aiRecommendResults.length === 0 && (
-                    <div className={`col-span-1 md:col-span-2 lg:col-span-3 py-12 text-center rounded-3xl border ${theme === 'light' ? 'bg-slate-50 border-slate-200' : 'bg-slate-800/50 border-white/10'}`}>
-                       <p className={`font-bold ${theme === 'light' ? 'text-slate-500' : 'text-gray-400'}`}>没有找到合适的档案喔，换个说法试试吧！</p>
-                    </div>
-                )}
-            </div>
-        </Modal>
       )}
 
       {/* API Config Modal */}
