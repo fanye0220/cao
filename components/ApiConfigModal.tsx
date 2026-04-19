@@ -41,6 +41,7 @@ export const ApiConfigModal: React.FC<ApiConfigModalProps> = ({ isOpen, onClose,
   const [configs, setConfigs] = useState<ApiConfig[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   
+  const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [editingConfig, setEditingConfig] = useState<ApiConfig | null>(null);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [fetchMessage, setFetchMessage] = useState('');
@@ -73,16 +74,52 @@ export const ApiConfigModal: React.FC<ApiConfigModalProps> = ({ isOpen, onClose,
     }
   };
 
+  const updateConfig = (updates: Partial<ApiConfig>) => {
+    if (!editingConfig) return;
+    const updated = { ...editingConfig, ...updates };
+    setEditingConfig(updated);
+    
+    // Auto-save logic: instantly update configs array and localStorage
+    setConfigs(prevConfigs => {
+      let newConfigs = prevConfigs.map(c => c.id === updated.id ? updated : c);
+      // Fallback: if it's somehow not in the list, push it
+      if (!newConfigs.some(c => c.id === updated.id)) {
+        newConfigs.push(updated);
+      }
+      localStorage.setItem('glass_tavern_api_configs', JSON.stringify(newConfigs));
+      return newConfigs;
+    });
+  };
+
   const handleCreateNew = () => {
-    setEditingConfig({
+    const newConfig: ApiConfig = {
       id: crypto.randomUUID(),
-      name: '新连接',
+      name: `新连接 ${configs.length + 1}`,
       type: 'openai',
       apiKey: '',
-      baseUrl: 'https://api.openai.com/v1',
+      baseUrl: '',
       selectedModel: '',
       availableModels: [],
+    };
+    
+    setEditingConfig(newConfig);
+    
+    // Instantly save it so it's not "lost" if they interact without hitting save
+    setConfigs(prev => {
+        const newConfigs = [...prev, newConfig];
+        localStorage.setItem('glass_tavern_api_configs', JSON.stringify(newConfigs));
+        return newConfigs;
     });
+    setActiveId(newConfig.id);
+    localStorage.setItem('glass_tavern_active_api', newConfig.id);
+  };
+
+  const getEffectiveBaseUrl = (config: ApiConfig) => {
+    if (config.type === 'openai') {
+      const url = config.baseUrl || 'https://api.openai.com/v1';
+      return url.endsWith('/') ? url.slice(0, -1) : url;
+    }
+    return config.baseUrl;
   };
 
   const handleFetchModels = async () => {
@@ -91,8 +128,8 @@ export const ApiConfigModal: React.FC<ApiConfigModalProps> = ({ isOpen, onClose,
     setFetchMessage('');
     try {
       if (editingConfig.type === 'openai') {
-        const url = new URL('/models', editingConfig.baseUrl);
-        const res = await fetch(url.toString(), {
+        const url = `${getEffectiveBaseUrl(editingConfig)}/models`;
+        const res = await fetch(url, {
           headers: {
             'Authorization': `Bearer ${editingConfig.apiKey}`
           }
@@ -101,14 +138,14 @@ export const ApiConfigModal: React.FC<ApiConfigModalProps> = ({ isOpen, onClose,
         const data = await res.json();
         if (data.data) {
           const models = data.data.map((m: any) => m.id);
-          setEditingConfig({ ...editingConfig, availableModels: models, selectedModel: models.includes(editingConfig.selectedModel) ? editingConfig.selectedModel : (models[0] || '') });
+          const sel = models.includes(editingConfig.selectedModel) ? editingConfig.selectedModel : (models[0] || '');
+          updateConfig({ availableModels: models, selectedModel: sel });
           setFetchMessage(`成功获取 ${data.data.length} 个模型`);
         }
       } else {
         // Simple manual definition for Gemini for now, fetching gemini models requires a different Google specific API
         const geminiModels = ['gemini-3.1-pro-preview', 'gemini-1.5-pro', 'gemini-1.5-flash'];
-        setEditingConfig({
-          ...editingConfig, 
+        updateConfig({
           availableModels: geminiModels,
           selectedModel: 'gemini-3.1-pro-preview'
         });
@@ -127,8 +164,8 @@ export const ApiConfigModal: React.FC<ApiConfigModalProps> = ({ isOpen, onClose,
      try {
        // Minimal ping based on type
        if (editingConfig.type === 'openai') {
-         const url = new URL('/models', editingConfig.baseUrl);
-         const res = await fetch(url.toString(), {
+         const url = `${getEffectiveBaseUrl(editingConfig)}/models`;
+         const res = await fetch(url, {
            headers: { 'Authorization': `Bearer ${editingConfig.apiKey}` }
          });
          if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
@@ -149,24 +186,8 @@ export const ApiConfigModal: React.FC<ApiConfigModalProps> = ({ isOpen, onClose,
   };
 
   const handleSaveConfig = () => {
-    if (!editingConfig) return;
-    if (!editingConfig.name || !editingConfig.apiKey) {
-      alert('名称和 API Key 不能为空');
-      return;
-    }
-
-    const existingIndex = configs.findIndex(c => c.id === editingConfig.id);
-    let newConfigs = [...configs];
-    if (existingIndex >= 0) {
-      newConfigs[existingIndex] = editingConfig;
-    } else {
-      newConfigs.push(editingConfig);
-    }
-    
-    // Always make saved config the active one
-    const newActiveId = editingConfig.id;
-    
-    saveConfigs(newConfigs, newActiveId);
+    // Legacy function, no longer needed since it auto-saves, just close
+    onClose();
   };
 
   const handleDelete = (id: string) => {
@@ -251,13 +272,7 @@ export const ApiConfigModal: React.FC<ApiConfigModalProps> = ({ isOpen, onClose,
                     <input 
                       type="text" 
                       value={editingConfig.name}
-                      onChange={e => {
-                         const updated = {...editingConfig, name: e.target.value};
-                         setEditingConfig(updated);
-                         // Auto live update
-                         const newConfigs = configs.map(c => c.id === updated.id ? updated : c);
-                         setConfigs(newConfigs);
-                      }}
+                      onChange={e => updateConfig({ name: e.target.value })}
                       className={`flex-1 p-3 rounded-xl border outline-none text-sm transition-all ${bgInput} ${textColor}`}
                       placeholder="例如: DeepSeek、本地Ollama"
                     />
@@ -268,7 +283,7 @@ export const ApiConfigModal: React.FC<ApiConfigModalProps> = ({ isOpen, onClose,
                 <label className={`block text-[13px] mb-1.5 ml-1 ${textColor}`}>接口类型</label>
                 <select 
                   value={editingConfig.type}
-                  onChange={e => setEditingConfig({...editingConfig, type: e.target.value as any})}
+                  onChange={e => updateConfig({ type: e.target.value as any })}
                   className={`w-full p-3 rounded-xl border outline-none text-sm transition-all ${bgInput} ${textColor}`}
                 >
                   <option value="openai" className="text-slate-800">OpenAI 兼容</option>
@@ -285,7 +300,7 @@ export const ApiConfigModal: React.FC<ApiConfigModalProps> = ({ isOpen, onClose,
                    <input 
                      type="text" 
                      value={editingConfig.baseUrl}
-                     onChange={e => setEditingConfig({...editingConfig, baseUrl: e.target.value})}
+                     onChange={e => updateConfig({ baseUrl: e.target.value })}
                      className={`w-full p-3 pl-9 rounded-xl border outline-none text-sm font-mono transition-all ${bgInput} ${textColor}`}
                      placeholder="例如: https://api.openai.com/v1"
                      disabled={editingConfig.type === 'gemini'}
@@ -295,13 +310,18 @@ export const ApiConfigModal: React.FC<ApiConfigModalProps> = ({ isOpen, onClose,
 
               <div>
                 <label className={`block text-[13px] mb-1.5 ml-1 ${textColor}`}>API Key</label>
-                <input 
-                  type="password" 
-                  value={editingConfig.apiKey}
-                  onChange={e => setEditingConfig({...editingConfig, apiKey: e.target.value})}
-                  className={`w-full p-3 rounded-xl border outline-none text-sm font-mono tracking-widest transition-all ${bgInput} ${textColor}`}
-                  placeholder="sk-..."
-                />
+                <div className="relative">
+                   <div className={`absolute left-3 top-1/2 -translate-y-1/2 ${subTextColor}`}>
+                       <Key size={16} />
+                   </div>
+                   <input 
+                     type="password" 
+                     value={editingConfig.apiKey}
+                     onChange={e => updateConfig({ apiKey: e.target.value })}
+                     className={`w-full p-3 pl-9 rounded-xl border outline-none text-sm font-mono tracking-widest transition-all ${bgInput} ${textColor}`}
+                     placeholder="sk-..."
+                   />
+                </div>
               </div>
 
               <div>
@@ -317,19 +337,32 @@ export const ApiConfigModal: React.FC<ApiConfigModalProps> = ({ isOpen, onClose,
                   </button>
                 </div>
                 
-                <div>
+                <div className="relative">
                    <input
-                     list="model-datalist"
                      value={editingConfig.selectedModel}
-                     onChange={e => setEditingConfig({...editingConfig, selectedModel: e.target.value})}
+                     onChange={e => updateConfig({ selectedModel: e.target.value })}
+                     onFocus={() => setShowModelDropdown(true)}
+                     onBlur={() => setTimeout(() => setShowModelDropdown(false), 200)}
                      className={`w-full p-3 rounded-xl border outline-none text-sm transition-all ${bgInput} ${textColor}`}
                      placeholder="下拉选择可用模型，或手动输入名称"
                    />
-                   <datalist id="model-datalist">
-                     {editingConfig.availableModels.map(model => (
-                       <option key={model} value={model} />
-                     ))}
-                   </datalist>
+                   
+                   {showModelDropdown && editingConfig.availableModels && editingConfig.availableModels.length > 0 && (
+                       <div className={`absolute z-10 w-full mt-1 max-h-48 overflow-y-auto rounded-xl border p-1 shadow-xl ${theme === 'light' ? 'bg-white border-slate-200' : 'bg-slate-800 border-white/10'}`}>
+                           {editingConfig.availableModels.map(model => (
+                               <div 
+                                   key={model} 
+                                   className={`px-3 py-2 text-sm rounded-lg cursor-pointer transition-colors ${theme === 'light' ? 'hover:bg-slate-100 text-slate-800' : 'hover:bg-white/10 text-slate-200'}`}
+                                   onClick={() => {
+                                       updateConfig({ selectedModel: model });
+                                       setShowModelDropdown(false);
+                                   }}
+                               >
+                                   {model}
+                               </div>
+                           ))}
+                       </div>
+                   )}
                    
                    {fetchMessage && (
                        <div className="mt-2 p-2 rounded-lg border border-green-500/20 bg-green-500/10 flex items-center gap-2 text-green-400 text-xs">
@@ -351,16 +384,10 @@ export const ApiConfigModal: React.FC<ApiConfigModalProps> = ({ isOpen, onClose,
                  <div className="flex items-center gap-3">
                      <button 
                          onClick={onClose} 
-                         className={`px-4 py-2.5 rounded-xl border transition-colors text-sm ${theme === 'light' ? 'bg-white border-slate-300 hover:bg-slate-50' : 'bg-transparent border-transparent hover:bg-white/5 disabled:opacity-50'} ${subTextColor}`}
+                         className="px-6 py-2.5 rounded-xl bg-[#3b82f6] text-white hover:bg-blue-500 text-sm font-medium flex items-center gap-1.5 transition-colors"
                      >
-                         取消
-                     </button>
-                     <button 
-                         onClick={handleSaveConfig} 
-                         className="px-4 py-2.5 rounded-xl bg-[#3b82f6] text-white hover:bg-blue-500 text-sm font-medium flex items-center gap-1.5 transition-colors"
-                     >
-                         <Save size={16} />
-                         保存设置
+                         <Check size={16} />
+                         完成
                      </button>
                  </div>
               </div>

@@ -952,8 +952,8 @@ const CharacterList: React.FC<CharacterListProps> = ({
         if (identicalChars.length > 1) {
           // Sort by date descending (newest first)
           const sorted = [...identicalChars].sort((a, b) => {
-            const timeA = Math.max(a.updatedAt || 0, a.importDate || 0, a.fileLastModified || 0);
-            const timeB = Math.max(b.updatedAt || 0, b.importDate || 0, b.fileLastModified || 0);
+            const timeA = a.importDate || Math.max(a.updatedAt || 0, a.fileLastModified || 0);
+            const timeB = b.importDate || Math.max(b.updatedAt || 0, b.fileLastModified || 0);
             return timeB - timeA;
           });
           // Keep sorted[0], mark rest for deletion
@@ -1868,6 +1868,175 @@ const CharacterList: React.FC<CharacterListProps> = ({
                       <div className="h-full bg-red-500 transition-all duration-300" style={{width: `${(autoTagProgress.fail / autoTagProgress.total) * 100}%`}}></div>
                   </div>
 
+                  {/* Tag Replacement UI (Separated from logs) */}
+                  {autoTagQueue.some(i => i.status === 'review') && (
+                      <div className="mt-4 pt-4 border-t border-white/10">
+                          <div className="flex justify-between items-center mb-3">
+                              <div className="text-xs font-bold flex items-center gap-1.5 text-amber-500">
+                                  <Sparkles size={14} />
+                                  待确认替换标签 / 合并 ({autoTagQueue.filter(i => i.status === 'review').length})
+                              </div>
+                              <div className="flex gap-2">
+                                  <button
+                                      onClick={() => {
+                                          const newQ = [...autoTagQueue];
+                                          let updated = 0;
+                                          newQ.forEach((item, idx) => {
+                                              if (item.status === 'review') {
+                                                  const mergedTags = Array.from(new Set([...(item.char.tags || []), ...(item.generatedTags || [])]));
+                                                  onUpdate?.({ ...item.char, tags: mergedTags });
+                                                  newQ[idx] = { ...item, status: 'success', generatedTags: mergedTags };
+                                                  updated++;
+                                              }
+                                          });
+                                          setAutoTagQueue(newQ);
+                                          autoTagQueueRef.current = newQ;
+                                          setAutoTagProgress(p => ({ ...p, current: p.current + updated, success: p.success + updated }));
+                                      }}
+                                      className={`px-3 py-1.5 rounded flex items-center gap-1 text-[10px] font-bold transition-all ${theme === 'light' ? 'bg-slate-200 hover:bg-slate-300 text-slate-700' : 'bg-white/10 hover:bg-white/20 text-gray-200'}`}
+                                  >
+                                      <FolderPlus size={12}/> 全部合并旧标签
+                                  </button>
+                                  <button
+                                      onClick={() => {
+                                          const newQ = [...autoTagQueue];
+                                          let updated = 0;
+                                          newQ.forEach((item, idx) => {
+                                              if (item.status === 'review') {
+                                                  onUpdate?.({ ...item.char, tags: item.generatedTags });
+                                                  newQ[idx] = { ...item, status: 'success' };
+                                                  updated++;
+                                              }
+                                          });
+                                          setAutoTagQueue(newQ);
+                                          autoTagQueueRef.current = newQ;
+                                          setAutoTagProgress(p => ({ ...p, current: p.current + updated, success: p.success + updated }));
+                                      }}
+                                      className="px-3 py-1.5 rounded flex items-center gap-1 text-[10px] font-bold text-white bg-blue-500 hover:bg-blue-600 transition-all shadow-sm"
+                                  >
+                                      <Check size={12}/> 全部覆盖替换
+                                  </button>
+                              </div>
+                          </div>
+
+                          <div className="max-h-80 overflow-y-auto space-y-3 pr-2 custom-scrollbar animate-in fade-in slide-in-from-top-2">
+                              {autoTagQueue.map((item, idx) => {
+                                  if (item.status !== 'review') return null;
+                                  
+                                  const removeOldTag = (tagToRemove: string) => {
+                                      const newQ = [...autoTagQueue];
+                                      newQ[idx] = { 
+                                          ...item, 
+                                          char: { 
+                                              ...item.char, 
+                                              tags: (item.char.tags || []).filter((t: string) => t !== tagToRemove) 
+                                          } 
+                                      };
+                                      setAutoTagQueue(newQ);
+                                      autoTagQueueRef.current = newQ;
+                                  };
+
+                                  const removeNewTag = (tagToRemove: string) => {
+                                      const newQ = [...autoTagQueue];
+                                      newQ[idx] = { 
+                                          ...item, 
+                                          generatedTags: (item.generatedTags || []).filter(t => t !== tagToRemove) 
+                                      };
+                                      setAutoTagQueue(newQ);
+                                      autoTagQueueRef.current = newQ;
+                                  };
+
+                                  return (
+                                      <div key={item.char.id + idx} className={`p-3 rounded-lg flex flex-col gap-3 ${theme === 'light' ? 'bg-slate-50 border border-slate-200' : 'bg-black/20 border border-white/5'}`}>
+                                          <div className="flex items-center gap-2 border-b pb-2 mb-1 border-opacity-10 border-white">
+                                              <img src={item.char.avatarUrl} className="w-8 h-8 rounded-full object-cover" />
+                                              <span className={`font-bold text-sm ${theme === 'light' ? 'text-slate-800' : 'text-slate-200'}`}>{item.char.name}</span>
+                                          </div>
+                                          <div className="flex flex-col gap-3">
+                                              {/* Old */}
+                                              <div className={`flex flex-col p-3 rounded-xl border ${theme === 'light' ? 'bg-white border-slate-200' : 'bg-white/5 border-white/10'}`}>
+                                                  <div className="flex items-center gap-2 mb-2">
+                                                      <span className="text-sm font-bold opacity-70">旧标签</span>
+                                                  </div>
+                                                  <div className="flex flex-wrap gap-1.5 min-h-[32px] items-center">
+                                                      {(!item.char.tags || item.char.tags.length === 0) && <span className="text-xs opacity-40 py-1">无</span>}
+                                                      {(item.char.tags || []).map((tag: string) => (
+                                                          <span key={tag} className="flex items-center gap-1 text-xs pl-2 pr-1 py-1 rounded bg-slate-500/10 border border-slate-500/20 opacity-80 group">
+                                                              {tag}
+                                                              <button onClick={() => removeOldTag(tag)} className="opacity-40 hover:opacity-100 hover:text-red-500 transition-colors ml-1 p-0.5 rounded hover:bg-slate-500/20">
+                                                                  <X size={12} />
+                                                              </button>
+                                                          </span>
+                                                      ))}
+                                                  </div>
+                                              </div>
+                                              
+                                              {/* New */}
+                                              <div className={`flex flex-col p-3 rounded-xl border ${theme === 'light' ? 'bg-white border-blue-200 shadow-sm' : 'bg-blue-900/20 border-blue-500/30'}`}>
+                                                  <div className="flex items-center gap-2 mb-2">
+                                                      <span className="text-sm font-bold text-blue-500">AI 生成新标签</span>
+                                                  </div>
+                                                  <div className="flex flex-wrap gap-1.5 min-h-[32px] items-center">
+                                                      {item.generatedTags?.map((tag: string) => (
+                                                          <span key={tag} className="flex items-center gap-1 text-xs pl-2 pr-1 py-1 rounded bg-blue-500/10 text-blue-600 border border-blue-500/20 group">
+                                                              {tag}
+                                                              <button onClick={() => removeNewTag(tag)} className="opacity-50 hover:opacity-100 hover:text-red-500 transition-colors ml-1 p-0.5 rounded hover:bg-blue-500/20">
+                                                                  <X size={12} />
+                                                              </button>
+                                                          </span>
+                                                      ))}
+                                                  </div>
+                                              </div>
+                                          </div>
+                                          
+                                          <div className="flex justify-end gap-2 mt-2 pt-2 border-t border-opacity-10 border-white">
+                                              <button 
+                                                  onClick={() => {
+                                                      const newQ = [...autoTagQueue];
+                                                      newQ[idx] = { ...item, status: 'fail', error: '用户已丢弃' };
+                                                      setAutoTagQueue(newQ);
+                                                      autoTagQueueRef.current = newQ;
+                                                      setAutoTagProgress(p => ({ ...p, current: p.current + 1, fail: p.fail + 1 }));
+                                                  }}
+                                                  className={`px-4 py-2 rounded-lg flex items-center gap-1.5 text-xs font-bold transition-all ${theme === 'light' ? 'bg-slate-200/50 hover:bg-slate-200 text-slate-600' : 'bg-white/10 hover:bg-red-500/20 text-gray-400 hover:text-red-400'}`}
+                                              >
+                                                  <Trash2 size={14}/> 丢弃
+                                              </button>
+                                              <button 
+                                                  onClick={() => {
+                                                      const mergedTags = Array.from(new Set([...(item.char.tags || []), ...(item.generatedTags || [])]));
+                                                      onUpdate?.({ ...item.char, tags: mergedTags });
+                                                      const newQ = [...autoTagQueue];
+                                                      newQ[idx] = { ...item, status: 'success', generatedTags: mergedTags };
+                                                      setAutoTagQueue(newQ);
+                                                      autoTagQueueRef.current = newQ;
+                                                      setAutoTagProgress(p => ({ ...p, current: p.current + 1, success: p.success + 1 }));
+                                                  }}
+                                                  className={`px-4 py-2 rounded-lg flex items-center gap-1.5 text-xs font-bold transition-all ${theme === 'light' ? 'bg-slate-200 hover:bg-slate-300 text-slate-700' : 'bg-white/10 hover:bg-white/20 text-gray-200'}`}
+                                              >
+                                                  <FolderPlus size={14}/> 合并旧标签
+                                              </button>
+                                              <button 
+                                                  onClick={() => {
+                                                      onUpdate?.({ ...item.char, tags: item.generatedTags });
+                                                      const newQ = [...autoTagQueue];
+                                                      newQ[idx] = { ...item, status: 'success' };
+                                                      setAutoTagQueue(newQ);
+                                                      autoTagQueueRef.current = newQ;
+                                                      setAutoTagProgress(p => ({ ...p, current: p.current + 1, success: p.success + 1 }));
+                                                  }}
+                                                  className="px-4 py-2 rounded-lg flex items-center gap-1.5 text-xs font-bold text-white bg-blue-500 hover:bg-blue-600 transition-all shadow-sm"
+                                              >
+                                                  <Check size={14}/> 覆盖替换
+                                              </button>
+                                          </div>
+                                      </div>
+                                  );
+                              })}
+                          </div>
+                      </div>
+                  )}
+
                   {/* Log items */}
                   <div className="mt-4 pt-4 border-t border-white/10">
                       <div 
@@ -1880,13 +2049,15 @@ const CharacterList: React.FC<CharacterListProps> = ({
                       
                       {showAutoTagLogs && (
                           <div className="max-h-60 overflow-y-auto space-y-2 pr-2 custom-scrollbar animate-in fade-in slide-in-from-top-2">
-                             {autoTagQueue.map((item, idx) => (
+                             {autoTagQueue.map((item, idx) => {
+                                 if (item.status === 'review') return null; // Exclude review items from logs to avoid duplication/clutter
+
+                                 return (
                                  <div key={item.char.id + idx} className={`flex flex-col p-3 rounded-xl border ${theme === 'light' ? 'bg-white border-slate-200' : 'bg-[#0f111a] border-white/5'} ${item.status === 'success' ? 'border-green-500/30 bg-green-500/5' : ''}`}>
                                     <div className="flex justify-between items-center">
                                         <div className="flex items-center gap-2">
                                             {item.status === 'pending' && <div className="w-3.5 h-3.5 rounded-full border-2 border-slate-500/30"></div>}
                                             {item.status === 'processing' && <RefreshCw size={14} className="animate-spin text-blue-500" />}
-                                            {item.status === 'review' && <Sparkles size={14} className="text-amber-500" />}
                                             {item.status === 'success' && <Check size={14} className="text-green-500" />}
                                             {item.status === 'fail' && <AlertTriangle size={14} className="text-red-500" />}
                                             <span className={`font-bold text-sm truncate max-w-[120px] ${theme === 'light' ? 'text-slate-800' : 'text-slate-200'}`}>{item.char.name}</span>
@@ -1894,90 +2065,10 @@ const CharacterList: React.FC<CharacterListProps> = ({
                                         <div>
                                             {item.status === 'pending' && <span className="text-xs opacity-50">等待中</span>}
                                             {item.status === 'processing' && <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-500 font-bold">处理中</span>}
-                                            {item.status === 'review' && <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-600 font-bold">待审核确认</span>}
                                             {item.status === 'success' && <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/20 text-green-500 font-bold">已保存</span>}
                                             {item.status === 'fail' && <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/20 text-red-500 font-bold">失败 {item.retries > 0 ? `(${item.retries})` : ''}</span>}
                                         </div>
                                     </div>
-                                    
-                                    {/* Review UI */}
-                                    {item.status === 'review' && item.generatedTags && (
-                                        <div className={`mt-3 p-3 rounded-lg flex flex-col gap-3 ${theme === 'light' ? 'bg-slate-50 border border-slate-200' : 'bg-black/20 border border-white/5'}`}>
-                                            <div className="flex items-stretch gap-2">
-                                                {/* Old */}
-                                                <div className={`flex-1 flex flex-col p-2 rounded border ${theme === 'light' ? 'bg-white border-slate-200' : 'bg-white/5 border-white/10'}`}>
-                                                    <div className="flex items-center gap-2 mb-2">
-                                                        <img src={item.char.avatarUrl} className="w-8 h-8 rounded-full object-cover" />
-                                                        <span className="text-xs font-bold opacity-70">旧标签</span>
-                                                    </div>
-                                                    <div className="flex flex-wrap gap-1 min-h-[24px]">
-                                                        {(!item.char.tags || item.char.tags.length === 0) && <span className="text-[10px] opacity-40">无</span>}
-                                                        {(item.char.tags || []).map((tag: string) => (
-                                                            <span key={tag} className="text-[10px] px-1.5 py-0 rounded bg-slate-500/10 border border-slate-500/20 opacity-80">{tag}</span>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                                {/* Arrow */}
-                                                <div className="flex flex-col justify-center items-center px-1 opacity-50">
-                                                    <ArrowRight size={14} />
-                                                </div>
-                                                {/* New */}
-                                                <div className={`flex-1 flex flex-col p-2 rounded border ${theme === 'light' ? 'bg-white border-blue-200' : 'bg-blue-900/20 border-blue-500/30'}`}>
-                                                    <div className="flex items-center gap-2 mb-2">
-                                                        <img src={item.char.avatarUrl} className="w-8 h-8 rounded-full object-cover" />
-                                                        <span className="text-xs font-bold text-blue-500">AI 生成</span>
-                                                    </div>
-                                                    <div className="flex flex-wrap gap-1 min-h-[24px]">
-                                                        {item.generatedTags.map((tag: string) => (
-                                                            <span key={tag} className="text-[10px] px-1.5 py-0 rounded bg-blue-500/10 text-blue-600 border border-blue-500/20">{tag}</span>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            
-                                            <div className="flex justify-end gap-2 mt-1">
-                                                <button 
-                                                    onClick={() => {
-                                                        const newQ = [...autoTagQueue];
-                                                        newQ[idx] = { ...item, status: 'fail', error: '用户已丢弃' };
-                                                        setAutoTagQueue(newQ);
-                                                        autoTagQueueRef.current = newQ;
-                                                        setAutoTagProgress(p => ({ ...p, current: p.current + 1, fail: p.fail + 1 }));
-                                                    }}
-                                                    className={`px-3 py-1.5 rounded flex items-center gap-1 text-[10px] font-bold transition-all ${theme === 'light' ? 'bg-slate-200/50 hover:bg-slate-200 text-slate-600' : 'bg-white/10 hover:bg-red-500/20 text-gray-400 hover:text-red-400'}`}
-                                                >
-                                                    <Trash2 size={12}/> 丢弃
-                                                </button>
-                                                <button 
-                                                    onClick={() => {
-                                                        const mergedTags = Array.from(new Set([...(item.char.tags || []), ...(item.generatedTags || [])]));
-                                                        onUpdate?.({ ...item.char, tags: mergedTags });
-                                                        const newQ = [...autoTagQueue];
-                                                        newQ[idx] = { ...item, status: 'success', generatedTags: mergedTags };
-                                                        setAutoTagQueue(newQ);
-                                                        autoTagQueueRef.current = newQ;
-                                                        setAutoTagProgress(p => ({ ...p, current: p.current + 1, success: p.success + 1 }));
-                                                    }}
-                                                    className={`px-3 py-1.5 rounded flex items-center gap-1 text-[10px] font-bold transition-all ${theme === 'light' ? 'bg-slate-200 hover:bg-slate-300 text-slate-700' : 'bg-white/10 hover:bg-white/20 text-gray-200'}`}
-                                                >
-                                                    <FolderPlus size={12}/> 合并旧标签
-                                                </button>
-                                                <button 
-                                                    onClick={() => {
-                                                        onUpdate?.({ ...item.char, tags: item.generatedTags });
-                                                        const newQ = [...autoTagQueue];
-                                                        newQ[idx] = { ...item, status: 'success' };
-                                                        setAutoTagQueue(newQ);
-                                                        autoTagQueueRef.current = newQ;
-                                                        setAutoTagProgress(p => ({ ...p, current: p.current + 1, success: p.success + 1 }));
-                                                    }}
-                                                    className="px-3 py-1.5 rounded flex items-center gap-1 text-[10px] font-bold text-white bg-blue-500 hover:bg-blue-600 transition-all shadow-sm"
-                                                >
-                                                    <Check size={12}/> 覆盖替换
-                                                </button>
-                                            </div>
-                                        </div>
-                                    )}
 
                                     {item.status !== 'review' && item.generatedTags && item.generatedTags.length > 0 && (
                                         <div className="flex flex-wrap gap-1 mt-2">
@@ -1990,7 +2081,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
                                         <div className="text-[10px] text-red-400 mt-1">{item.error}</div>
                                     )}
                                  </div>
-                             ))}
+                             )})}
                           </div>
                       )}
                   </div>

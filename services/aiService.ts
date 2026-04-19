@@ -41,7 +41,8 @@ const executePrompt = async (prompt: string, defaultModelName: string): Promise<
   // Use configured API
   if (config.type === 'openai') {
     const model = config.selectedModel || 'gpt-3.5-turbo';
-    const baseUrl = config.baseUrl.endsWith('/') ? config.baseUrl.slice(0, -1) : config.baseUrl;
+    const effectiveBaseUrl = config.baseUrl || 'https://api.openai.com/v1';
+    const baseUrl = effectiveBaseUrl.endsWith('/') ? effectiveBaseUrl.slice(0, -1) : effectiveBaseUrl;
     const url = `${baseUrl}/chat/completions`;
     
     const res = await fetch(url, {

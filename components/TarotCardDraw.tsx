@@ -29,18 +29,19 @@ export function TarotCardDraw({ characters, onComplete, onJump, onRedraw, theme 
     return (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
             <motion.div 
+                layout
                 initial={{ opacity: 0, scale: 0.95, y: 10 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: 10 }}
                 className={`w-full max-w-[320px] rounded-[24px] shadow-2xl overflow-hidden flex flex-col ${isLight ? 'bg-[#f4f5f9]' : 'bg-[#1a1b1e] border border-white/10'}`}
             >
                 {/* Header */}
-                <div className="relative pt-5 pb-2 px-6 text-center">
+                <motion.div layout="position" className="relative pt-5 pb-2 px-6 text-center">
                     <h2 className={`font-bold text-base ${isLight ? 'text-slate-800' : 'text-white'}`}>
                         {isShuffling ? (isMultiple ? '为您挑选档案中...' : '每日抽卡中...') : (isMultiple ? '推荐的档案' : '今日抽卡结果')}
                     </h2>
                     {/* Close button in top right if we want, or rely on bottom actions */}
-                </div>
+                </motion.div>
 
                 {/* Content Area */}
                 <div className="p-4 pt-2 flex-1 flex flex-col items-center justify-center min-h-[200px]">
@@ -54,13 +55,13 @@ export function TarotCardDraw({ characters, onComplete, onJump, onRedraw, theme 
                                 className="flex flex-col items-center w-full"
                             >
                                 {/* 3 Cards Shuffling Animation similar to video */}
-                                <div className="relative w-32 h-32 mb-4 flex items-center justify-center">
+                                <div className="relative w-48 h-64 mb-6 flex items-center justify-center">
                                     {[0, 1, 2].map((i) => (
                                         <motion.div
                                             key={i}
                                             animate={{ 
-                                                rotate: [-15 + i * 15, 0, -15 + i * 15],
-                                                y: [0, -10, 0]
+                                                rotate: [-8 + i * 8, 0, -8 + i * 8],
+                                                y: [0, -15, 0]
                                             }}
                                             transition={{
                                                 duration: 1.5,
@@ -68,9 +69,9 @@ export function TarotCardDraw({ characters, onComplete, onJump, onRedraw, theme 
                                                 ease: "easeInOut",
                                                 delay: i * 0.2
                                             }}
-                                            className={`absolute w-20 h-28 rounded-xl shadow-md border 
-                                                ${isLight ? 'bg-blue-100/50 border-blue-200' : 'bg-blue-900/30 border-blue-800/50'}
-                                                ${i === 0 ? '-translate-x-6 rotate-[-15deg]' : i === 1 ? 'z-10' : 'translate-x-6 rotate-[15deg]'}`}
+                                            className={`absolute w-36 h-48 rounded-2xl shadow-lg border 
+                                                ${isLight ? 'bg-gradient-to-tr from-blue-100 to-indigo-50 border-blue-200' : 'bg-gradient-to-tr from-blue-900/40 to-indigo-900/20 border-blue-800/50'}
+                                                ${i === 0 ? '-translate-x-8 rotate-[-8deg]' : i === 1 ? 'z-10' : 'translate-x-8 rotate-[8deg]'}`}
                                         />
                                     ))}
                                 </div>
@@ -127,46 +128,55 @@ export function TarotCardDraw({ characters, onComplete, onJump, onRedraw, theme 
                 </div>
 
                 {/* Actions */}
-                <div className={`p-4 pt-2 flex flex-col gap-2 ${isShuffling ? 'opacity-0 pointer-events-none' : 'opacity-100'} transition-opacity duration-300`}>
-                    {!isMultiple && onRedraw && (
-                        <button 
-                            onClick={onRedraw} 
-                            disabled={isShuffling}
-                            className={`w-full py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors
-                                ${isLight ? 'bg-white text-slate-700 hover:bg-slate-50 border border-slate-200 shadow-sm' : 'bg-white/5 text-gray-200 hover:bg-white/10 border border-white/10'}`}
+                <AnimatePresence>
+                    {!isShuffling && (
+                        <motion.div 
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: 'auto' }}
+                            exit={{ opacity: 0, height: 0 }}
+                            className="p-4 pt-2 flex flex-col gap-2 overflow-hidden"
                         >
-                            <RefreshCw size={16} />
-                            重新抽取档案
-                        </button>
+                            {!isMultiple && onRedraw && (
+                                <button 
+                                    onClick={onRedraw} 
+                                    disabled={isShuffling}
+                                    className={`w-full py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors
+                                        ${isLight ? 'bg-white text-slate-700 hover:bg-slate-50 border border-slate-200 shadow-sm' : 'bg-white/5 text-gray-200 hover:bg-white/10 border border-white/10'}`}
+                                >
+                                    <RefreshCw size={16} />
+                                    重新抽取档案
+                                </button>
+                            )}
+                            
+                            <button 
+                                onClick={() => {
+                                    if (onJump && !isMultiple) {
+                                        onJump(characters[0]);
+                                    } else {
+                                        onComplete();
+                                    }
+                                }} 
+                                disabled={isShuffling}
+                                className={`w-full py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 shadow-md transition-colors
+                                    ${isLight ? 'bg-blue-500 text-white hover:bg-blue-600 shadow-blue-500/20' : 'bg-blue-600 text-white hover:bg-blue-500 shadow-blue-900/20'}`}
+                            >
+                                {!isMultiple && onJump ? <Eye size={16} /> : null}
+                                {!isMultiple && onJump ? '跳转查看' : '确定'}
+                            </button>
+                            
+                            {!isMultiple && onJump && (
+                                <button 
+                                    onClick={onComplete} 
+                                    disabled={isShuffling}
+                                    className={`w-full py-3 rounded-xl font-medium text-sm transition-colors
+                                        ${isLight ? 'text-slate-500 hover:text-slate-700 hover:bg-slate-100' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}
+                                >
+                                    取消
+                                </button>
+                            )}
+                        </motion.div>
                     )}
-                    
-                    <button 
-                        onClick={() => {
-                            if (onJump && !isMultiple) {
-                                onJump(characters[0]);
-                            } else {
-                                onComplete();
-                            }
-                        }} 
-                        disabled={isShuffling}
-                        className={`w-full py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 shadow-md transition-colors
-                            ${isLight ? 'bg-blue-500 text-white hover:bg-blue-600 shadow-blue-500/20' : 'bg-blue-600 text-white hover:bg-blue-500 shadow-blue-900/20'}`}
-                    >
-                        {!isMultiple && onJump ? <Eye size={16} /> : null}
-                        {!isMultiple && onJump ? '跳转查看' : '确定'}
-                    </button>
-                    
-                    {!isMultiple && onJump && (
-                        <button 
-                            onClick={onComplete} 
-                            disabled={isShuffling}
-                            className={`w-full py-3 rounded-xl font-medium text-sm transition-colors
-                                ${isLight ? 'text-slate-500 hover:text-slate-700 hover:bg-slate-100' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}
-                        >
-                            取消
-                        </button>
-                    )}
-                </div>
+                </AnimatePresence>
             </motion.div>
         </div>
     );
