@@ -18,126 +18,220 @@ const getActiveApiConfig = () => {
   }
 };
 
-const executePrompt = async (prompt: string, defaultModelName: string): Promise<string> => {
+const executePrompt = async (prompt: string, defaultModelName: string, jsonMode: boolean = true): Promise<string> => {
   const config = getActiveApiConfig();
   
   if (!config) {
-    // Fallback to default Gemini using Env Var if no config is set
     const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error("No API connection configured, and no internal fallback key found.");
+    if (!apiKey) {
+      throw new Error("未配置 API Key。请在设置中配置 OpenAI 或 Gemini API Key。");
+    }
     
     const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model: defaultModelName,
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        temperature: 0.3
-      }
-    });
-    return response.text || "[]";
+    try {
+      const response = await ai.models.generateContent({
+        model: defaultModelName,
+        contents: prompt,
+        config: {
+          responseMimeType: jsonMode ? "application/json" : "text/plain",
+          temperature: 0.3
+        }
+      });
+      return response.text || (jsonMode ? "{}" : "");
+    } catch (err: any) {
+      console.error("Gemini API Error:", err);
+      throw new Error(`Gemini API 请求失败: ${err.message || "未知错误"}`);
+    }
   }
 
   // Use configured API
   if (config.type === 'openai') {
-    const model = config.selectedModel || 'gpt-3.5-turbo';
+    const model = config.selectedModel || 'gpt-4o-mini';
     const effectiveBaseUrl = config.baseUrl || 'https://api.openai.com/v1';
     const baseUrl = effectiveBaseUrl.endsWith('/') ? effectiveBaseUrl.slice(0, -1) : effectiveBaseUrl;
     const url = `${baseUrl}/chat/completions`;
     
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${config.apiKey}`
-      },
-      body: JSON.stringify({
-        model: model,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.3,
-        response_format: { type: "json_object" } // Some standard models require this
-      })
-    });
-    
-    if (!res.ok) throw new Error(`OpenAI API Error: ${res.statusText}`);
-    const data = await res.json();
-    return data.choices?.[0]?.message?.content || "[]";
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${config.apiKey}`
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.3,
+          ...(jsonMode ? { response_format: { type: "json_object" } } : {})
+        })
+      });
+      
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`OpenAI API 错误 (${res.status}): ${errText || res.statusText}`);
+      }
+      const data = await res.json();
+      return data.choices?.[0]?.message?.content || (jsonMode ? "{}" : "");
+    } catch (err: any) {
+      throw new Error(`OpenAI API 请求失败: ${err.message}`);
+    }
 
   } else if (config.type === 'gemini') {
     const ai = new GoogleGenAI({ apiKey: config.apiKey });
     const model = config.selectedModel || defaultModelName;
-    const response = await ai.models.generateContent({
-      model: model,
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        temperature: 0.3,
-        // if baseUrl is set for some reason, genai doesn't natively support proxying easily without custom fetch
-      }
-    });
-    return response.text || "[]";
+    try {
+      const response = await ai.models.generateContent({
+        model: model,
+        contents: prompt,
+        config: {
+          responseMimeType: jsonMode ? "application/json" : "text/plain",
+          temperature: 0.3,
+        }
+      });
+      return response.text || (jsonMode ? "{}" : "");
+    } catch (err: any) {
+      throw new Error(`Gemini API 请求失败: ${err.message}`);
+    }
   }
 
-  throw new Error("Invalid API config type");
+  throw new Error("不支持的 API 配置类型");
 };
 
-export interface RecommendationResponse {
-  keywords: string[];
-  results: RecommendationResult[];
+/**
+ * Stage 1: Extract semantic keywords from user query
+ */
+async function extractSearchKeywords(query: string): Promise<string[]> {
+  const prompt = `
+你是一个中文语义分析专家。用户的搜索意图是查找特定的酒馆角色卡。
+请从以下搜索词中提取出 5-10 个最核心的搜索关键词。
+
+搜索词: "${query}"
+
+关键词应涵盖：
+1. 身份职业（如：军官、主播、医生、校霸）
+2. 性格特质（如：腹黑、偏执、高冷、温柔）
+3. 核心梗/题材（如：强制爱、无限流、先婚后爱、破镜重圆）
+4. 外貌或背景（如：白发、制服、末世）
+
+请仅返回规范的 JSON 数组：
+["关键词1", "关键词2", ...]
+`;
+  try {
+    const text = await executePrompt(prompt, "gemini-3-flash-preview");
+    const cleanedText = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    const keywords = JSON.parse(cleanedText || "[]");
+    return Array.isArray(keywords) ? keywords : [];
+  } catch {
+    // Fallback to simple split if AI fails
+    return query.split(/[\s,，、]+/).filter(k => k.length > 1);
+  }
 }
 
-export async function recommendCharacters(characters: Character[], query: string): Promise<RecommendationResponse> {
-  const charactersPrompt = characters.map(c => 
-    `ID: ${c.id}\nName: ${c.name}\nTags: ${(c.tags || []).join(',')}\nDescription: ${c.description || ''}\nPersonality: ${c.personality || ''}\nScenario: ${c.scenario || ''}\n`
+/**
+ * Stage 2: Heavy local keyword scoring across all character fields
+ * Handles 4000+ cards locally in milliseconds.
+ */
+function localKeywordSearch(characters: Character[], keywords: string[]): Character[] {
+  const scores = characters.map(char => {
+    let score = 0;
+    const content = `
+      ${char.name} 
+      ${(char.tags || []).join(' ')} 
+      ${char.description || ''} 
+      ${char.personality || ''} 
+      ${char.scenario || ''} 
+      ${char.firstMessage || ''}
+      ${char.character_book?.entries.map(e => e.keys.join(' ') + ' ' + e.content).join(' ') || ''}
+    `.toLowerCase();
+
+    keywords.forEach(kw => {
+      const lowerKw = kw.toLowerCase();
+      // Weighted match: Name and Tags are highly important
+      if (char.name.toLowerCase().includes(lowerKw)) score += 20;
+      if ((char.tags || []).some(t => t.toLowerCase().includes(lowerKw))) score += 15;
+      
+      // Substring frequency match
+      const count = (content.split(lowerKw).length - 1);
+      score += Math.min(count * 2, 30); // Max 30 points for frequency to prevent spamming
+    });
+
+    return { char, score };
+  });
+
+  // Sort by score and take top 40 candidates
+  return scores
+    .filter(s => s.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 40)
+    .map(s => s.char);
+}
+
+export async function recommendCharacters(
+  characters: Character[], 
+  query: string, 
+  onLog?: (msg: string) => void
+): Promise<RecommendationResponse> {
+  // Stage 1: AI Keyword Extraction
+  onLog?.("正在进行语义分析并提取关键词...");
+  const searchKeywords = await extractSearchKeywords(query);
+  onLog?.(`提取关键词: [${searchKeywords.join(', ')}]`);
+
+  // Stage 2: Fast Local Scanning
+  onLog?.(`正在对库中 ${characters.length} 个角色进行全文本深度扫描（含设定、开场白、世界书）...`);
+  const candidates = localKeywordSearch(characters, searchKeywords);
+  
+  if (candidates.length === 0) {
+    onLog?.("本地全量检索未发现匹配项。");
+    return { keywords: searchKeywords, results: [] };
+  }
+  onLog?.(`初步筛选出 ${candidates.length} 张最具潜力角色卡，移交 AI 进行深度评估...`);
+
+  // Stage 3: AI Deep Ranking
+  const charactersPrompt = candidates.map(c => 
+    `ID: ${c.id}\nName: ${c.name}\nTags: ${(c.tags || []).join(',')}\n人设设定: ${c.description || ''}\n性格: ${c.personality || ''}\n背景/世界书: ${c.scenario || ''}\n开场白: ${c.firstMessage || ''}\n`
   ).join("\n---\n");
   
-  // Note: Added explicit JSON structure note for OpenAI compatibility
   const prompt = `
-You are a highly strict AI character librarian. I have a list of character cards for a roleplay application. 
-Here are the characters:
+你是一位资深、毒辣的小说/Roleplay卡牌管理员。
+我有 4000+ 角色卡，我已经通过关键词初步帮你筛选出了 40 张最接近的用户卡。
+请你仔细阅读这些卡片的【人设设置】、【背景世界观】以及【首句对话】，为用户推荐最符合需求的目标。
+
+用户需求: "${query}"
+候选关键词: ${searchKeywords.join(', ')}
+
+待评估角色卡列表如下：
 ${charactersPrompt}
 
-A user is searching for character recommendations based on this query: "${query}"
+任务：
+1. 从 40 个候选人中，选出最契合用户口味的 TOP 5-10。
+2. 评价标准：一定要看重性格（腹黑、偏执等）和开场白带来的氛围。
+3. 必须解释为什么推荐，引用卡片具体设定的原话。
 
-First, extract 3-5 core Chinese keywords from the user's query that describe the desired era, theme, identity, or personality.
-
-CRITICAL INSTRUCTIONS FOR MATCHING:
-1. YOU MUST PERFORM STRICT MATCHING based on the literal text or explicit setting of the characters.
-2. If the user asks for a specific profession, identity, or trope (e.g., "streamer"/"主播", "vampire", "CEO"), you MUST ONLY return characters where this identity/setting is explicitly written in their Name, Tags, Description, Personality, or Scenario.
-3. DO NOT hallucinate or infer roles based on "vibes" or personality. (e.g., Do NOT recommend a character as a "streamer" just because they are "lively, talkative, and good at chatting". They must actually be a streamer).
-4. If there are no characters that strictly match the requested identity or setting, return an empty array for recommendations. It is better to return nothing than to return a mismatched character.
-
-Return ONLY a valid JSON object matching this structure:
+返回规范 JSON 对象：
 {
-  "keywords": ["keyword1", "keyword2"],
+  "keywords": ${JSON.stringify(searchKeywords)},
   "recommendations": [
     {
-      "id": "character_id",
-      "reason": "a short explanation in Chinese of why this character fits the query. Quote the specific part of their setting that proves the match."
+      "id": "角色ID",
+      "reason": "引用人设、开场白或世界书中的具体描写，说明为什么这个卡很对味。"
     }
   ]
 }
-Return nothing else. Limit to at most 10 recommendations.
+不要编造卡片内容。最多 10 个。
 `;
   
   try {
     const text = await executePrompt(prompt, "gemini-3.1-pro-preview");
-    // Handle markdown json blocks returned by some models
     const cleanedText = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
     const parsed = JSON.parse(cleanedText || "{}");
-    
-    // Support backward compatibility if the model returns array directly
-    if (Array.isArray(parsed)) {
-      return { keywords: [], results: parsed };
-    }
+    const results = parsed.recommendations || parsed.results || [];
     
     return {
-      keywords: parsed.keywords || [],
-      results: parsed.recommendations || []
+      keywords: parsed.keywords || searchKeywords,
+      results: Array.isArray(results) ? results : []
     };
   } catch (e) {
-    console.error("AI Recommendation failed:", e);
-    return { keywords: [], results: [] };
+    throw e;
   }
 }
 
@@ -171,8 +265,7 @@ ${charsInput}
     const results = JSON.parse(cleanedText || "[]");
     return Array.isArray(results) ? results : [];
   } catch (e) {
-    console.error("AI Batch Auto Tag failed:", e);
-    return [];
+    throw e;
   }
 }
 
@@ -205,7 +298,6 @@ First Message: ${character.firstMessage || ''}
     const tags = JSON.parse(cleanedText || "[]");
     return Array.isArray(tags) ? tags : (tags.tags || []);
   } catch (e) {
-    console.error("AI Auto Tag failed:", e);
-    return [];
+    throw e;
   }
 }

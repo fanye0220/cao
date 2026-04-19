@@ -196,26 +196,30 @@ const CharacterList: React.FC<CharacterListProps> = ({
       addLog("开始分析您的需求...");
       await new Promise(resolve => setTimeout(resolve, 600));
       addLog(`已加载本地角色库，共 ${characters.length} 个角色...`);
+      if (characters.length > 100) {
+        addLog(`(因角色库记录较多，AI 将优先分析前 100 个档案以保证质量)`);
+      }
       await new Promise(resolve => setTimeout(resolve, 800));
-      addLog("正在向 AI 请求提取核心关键词...");
+      addLog("正在向 AI 发起语义理解与智能搜索...");
       
-      const response = await recommendCharacters(characters, aiRecommendQuery);
+      const response = await recommendCharacters(characters, aiRecommendQuery, addLog);
       
       if (response.keywords && response.keywords.length > 0) {
-        addLog(`提取到关键词: [${response.keywords.join(', ')}]`);
+        addLog(`AI 识别关键词: [${response.keywords.join(', ')}]`);
         await new Promise(resolve => setTimeout(resolve, 600));
       }
       
       const results = response.results || [];
-      addLog(`初步筛选出 ${results.length} 个候选角色，正在请求 AI 进行深度评估...`);
-      await new Promise(resolve => setTimeout(resolve, 600));
-      addLog("AI 评估完成！正在解析结果...");
-      await new Promise(resolve => setTimeout(resolve, 400));
-      addLog(`推荐完成！共为您找到 ${results.length} 个角色`);
+      if (results.length > 0) {
+        addLog(`AI 已完成深度筛选评估，并找到 ${results.length} 个高度匹配的档案...`);
+      } else {
+        addLog(`AI 遍历了档案库，但未发现高度契合该需求的角色卡。建议微调语焉或补充人设细节。`);
+      }
       
-      await new Promise(resolve => setTimeout(resolve, 800));
-
-      // Select the actual characters corresponding to the results for the drawing animation
+      await new Promise(resolve => setTimeout(resolve, 600));
+      addLog("正在解析推荐理由与最终结果...");
+      await new Promise(resolve => setTimeout(resolve, 400));
+      
       const recommendedCharacters = characters
         .filter(c => results.some(r => r.id === c.id))
         .map(c => {
@@ -224,12 +228,12 @@ const CharacterList: React.FC<CharacterListProps> = ({
         });
 
       setAiRecommendResults(recommendedCharacters);
-      // Wait, let's reset aiRecommendLoading here so the background widget stops loading state.
       setAiRecommendLoading(false);
-    } catch (e) {
-      console.error(e);
-      addLog("❌ API 请求失败或处理出错");
-      alert("AI推荐失败");
+    } catch (err: any) {
+      console.error(err);
+      const errorMessage = err.message || "未知错误";
+      addLog(`❌ AI 引擎报错: ${errorMessage}`);
+      alert(`AI 推荐执行失败: ${errorMessage}\n请检查您的 API 配置是否正确。`);
       setAiRecommendLoading(false);
     }
   };
