@@ -54,6 +54,7 @@ export interface Character {
   folder?: string;
   importFormat?: 'png' | 'json' | 'unknown';
   updatedAt?: number;
+  originalData?: any; // To maintain everything un-parsed
 }
 
 export type ViewMode = 'list' | 'edit';

@@ -170,7 +170,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
   const [showAutoTagModal, setShowAutoTagModal] = useState(false);
   const [showApiConfigModal, setShowApiConfigModal] = useState(false);
   const [autoTagTab, setAutoTagTab] = useState<'untagged' | 'tagged'>('untagged');
-  const [autoTagBatchSize, setAutoTagBatchSize] = useState(10);
+  const [autoTagBatchSize, setAutoTagBatchSize] = useState<number | 'all'>(10);
   const [aiRecommendQuery, setAiRecommendQuery] = useState('');
   const [aiRecommendLoading, setAiRecommendLoading] = useState(false);
   const [aiLogs, setAiLogs] = useState<{time: string, text: string}[]>([]);
@@ -344,10 +344,11 @@ const CharacterList: React.FC<CharacterListProps> = ({
      }
 
      const isRetag = autoTagTab === 'tagged';
-     const charsToProcess = characters.filter(c => {
+     const charsToProcessBase = characters.filter(c => {
         const hasTags = Array.isArray(c.tags) && c.tags.length > 0;
         return isRetag ? hasTags : !hasTags;
-     }).slice(0, autoTagBatchSize);
+     });
+     const charsToProcess = autoTagBatchSize === 'all' ? charsToProcessBase : charsToProcessBase.slice(0, autoTagBatchSize);
 
      if (charsToProcess.length === 0) {
        alert("没有找到符合条件的角色。");
@@ -696,10 +697,24 @@ const CharacterList: React.FC<CharacterListProps> = ({
                         {char.name}
                     </h3>
                     <div className="flex items-center gap-1 flex-shrink-0">
+                        {char.tags && char.tags.length > 0 && <Tag size={12} className="text-blue-500" title={`包含 ${char.tags.length} 个标签`} />}
                         {hasQr && <span className="text-[9px] font-extrabold text-green-500 border border-green-500/50 rounded-[3px] px-1 py-[1px] leading-none" title="包含二维码配置">QR</span>}
                         {hasWorldInfo && <Book size={14} className="text-yellow-500" title="包含世界书" />}
                     </div>
                 </div>
+                
+                {/* Character Tags Row */}
+                {char.tags && char.tags.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mb-2 max-h-[22px] overflow-hidden">
+                        {char.tags.slice(0, 3).map((tag: string, i: number) => (
+                            <span key={i} className={`text-[8px] px-1.5 py-0.5 rounded-md font-bold border ${theme === 'light' ? 'bg-blue-50 border-blue-100 text-blue-600' : 'bg-blue-500/10 border-blue-400/20 text-blue-400'}`}>
+                                {tag}
+                            </span>
+                        ))}
+                        {char.tags.length > 3 && <span className="text-[8px] opacity-40">+{char.tags.length - 3}</span>}
+                    </div>
+                )}
+
                 <div className={`flex items-center gap-1.5 text-[11px] font-medium truncate ${theme === 'light' ? 'text-gray-400' : 'text-gray-500'}`} title={char.originalFilename || "Local"}>
                     <FileText size={10} />
                     {char.originalFilename || "local_card.png"}
@@ -892,11 +907,14 @@ const CharacterList: React.FC<CharacterListProps> = ({
   const handleSingleExport = async (char: Character, format: 'json' | 'png') => {
     setExportMenuCharId(null);
     
+    // Get the absolute latest version from state to fix stale closure/snapshot issues
+    const latestChar = characters.find(c => c.id === char.id) || char;
+
     // Check if trying to export PNG from a JSON-imported character (or one without a proper avatar)
-    if (format === 'png' && char.importFormat === 'json') {
+    if (format === 'png' && latestChar.importFormat === 'json') {
         // We can check if the avatar is a blob URL (which means they uploaded one) or a picsum URL (placeholder)
         // If it's a placeholder, we should definitely warn.
-        if (char.avatarUrl.includes('picsum.photos')) {
+        if (latestChar.avatarUrl.includes('picsum.photos')) {
              if (!window.confirm("该角色是通过 JSON 导入的，且似乎没有上传自定义头像（当前是随机占位图）。\n导出 PNG 会将数据嵌入到这张占位图中。\n\n确定要继续吗？建议先在编辑页面上传一张图片。")) {
                  return;
              }
@@ -904,7 +922,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
     }
 
     try {
-      await exportCharacterData(char, format);
+      await exportCharacterData(latestChar, format);
     } catch (err) {
       console.error("Export failed", err);
       setError("导出失败");
@@ -1891,7 +1909,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
                   onClick={() => setAutoTagTab('tagged')}
                   className={`pb-2 text-sm font-bold transition-all border-b-2 ${autoTagTab === 'tagged' ? (theme === 'light' ? 'border-slate-800 text-slate-800' : 'border-white text-white') : 'border-transparent opacity-60 hover:opacity-100'}`}
               >
-                  重新打标 ({characters.filter(c => Array.isArray(c.tags) && c.tags.length > 0).length})
+                  已打标 ({characters.filter(c => Array.isArray(c.tags) && c.tags.length > 0).length})
               </button>
           </div>
 
@@ -1910,7 +1928,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
                   <span className="text-xs opacity-70">每次处理</span>
                   <select 
                       value={autoTagBatchSize} 
-                      onChange={e => setAutoTagBatchSize(Number(e.target.value))}
+                      onChange={e => setAutoTagBatchSize(e.target.value === 'all' ? 'all' : Number(e.target.value))}
                       className={`text-sm rounded-lg p-1.5 outline-none font-medium ${theme === 'light' ? 'bg-white border-slate-200 text-slate-800' : 'bg-black/50 border-white/20 text-white'}`}
                       disabled={autoTagState === 'running' || autoTagState === 'paused'}
                   >
@@ -1919,6 +1937,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
                       <option value={30}>30 个</option>
                       <option value={50}>50 个</option>
                       <option value={100}>100 个</option>
+                      <option value="all">全部</option>
                   </select>
               </div>
 
@@ -2500,6 +2519,18 @@ const CharacterList: React.FC<CharacterListProps> = ({
                                     <span className="opacity-70">本地修改:</span>
                                     <span>{new Date(viewCharacter.fileLastModified).toLocaleString()}</span>
                                 </div>
+                            )}
+                        </div>
+
+                        <div className="flex flex-wrap gap-1.5 mt-2 overflow-hidden max-h-[48px]">
+                            {viewCharacter.tags && viewCharacter.tags.length > 0 ? (
+                                viewCharacter.tags.map((tag: string, i: number) => (
+                                    <span key={i} className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${theme === 'light' ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-blue-500/10 border-blue-500/20 text-blue-400'}`}>
+                                        {tag}
+                                    </span>
+                                ))
+                            ) : (
+                                <span className="text-[10px] opacity-40 font-bold italic">未发现标签</span>
                             )}
                         </div>
 

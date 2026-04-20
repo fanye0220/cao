@@ -359,7 +359,8 @@ export const parseCharacterCard = async (file: File): Promise<Character> => {
     fileLastModified: file.lastModified,
     extra_qr_data: finalData.extra_qr_data, // Preserve if exists
     qrFileName: finalData.qrFileName,
-    importFormat: 'png'
+    importFormat: 'png',
+    originalData: characterData
   };
 };
 
@@ -434,7 +435,8 @@ export const parseCharacterJson = async (file: File): Promise<Character> => {
         fileLastModified: file.lastModified,
         extra_qr_data: finalData.extra_qr_data,
         qrFileName: finalData.qrFileName,
-        importFormat: 'json'
+        importFormat: 'json',
+        originalData: data
     };
 };
 
@@ -484,13 +486,24 @@ export const exportQrData = (qrList: any[], extraData: any = {}, originalFilenam
 
 export const getTavernExportData = (character: Character) => {
   let character_book_export = character.character_book;
-  // SillyTavern character book entries are often expected to be an object instead of an array.
-  // Wait, no, V2 spec says `character_book` structure should be preserved but often ST exports it as an object { "0": {...}, "1": {...} }. Let's export it as an array if it's currently an array according to spec, but wait, if the user imports a ST card which has object, we load it as array, but maybe we should let it be. But let's check tavern spec. Spec V2 says it can be just the book object. ST internally maps it. But let's export as an array to be safe, or map it if we must? Both work, ST converts array to dict anyway. Let's send what we have.
+  
+  const original = character.originalData || {};
+  let originalDataObj = original.data || original;
   
   return {
-    spec: "chara_card_v2",
-    spec_version: "2.0",
+    ...original, // Include any top-level properties to preserve them
+    name: character.name,
+    description: character.description,
+    personality: character.personality,
+    scenario: character.scenario,
+    first_mes: character.firstMessage,
+    mes_example: character.mes_example || "",
+    tags: character.tags || [],
+    system_tags: character.tags || [],
+    spec: original.spec || "chara_card_v2",
+    spec_version: original.spec_version || "2.0",
     data: {
+      ...originalDataObj, // Include nested properties
       name: character.name,
       description: character.description,
       personality: character.personality,
@@ -501,6 +514,7 @@ export const getTavernExportData = (character: Character) => {
       system_prompt: character.system_prompt || "",
       post_history_instructions: character.post_history_instructions || "",
       tags: character.tags || [],
+      system_tags: character.tags || [], // Some clients use system_tags
       creator: character.creator || "",
       character_version: character.character_version || "",
       alternate_greetings: character.alternate_greetings || [],
@@ -782,7 +796,9 @@ const crc32 = (buf: Uint8Array): number => {
 };
 
 const encodeBase64Utf8 = (str: string): string => {
-  const bytes = new TextEncoder().encode(str);
-  const binString = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
-  return btoa(binString);
+  return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g,
+      function toSolidBytes(_match, p1) {
+          return String.fromCharCode(parseInt(p1, 16));
+      }
+  ));
 };

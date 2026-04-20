@@ -6,6 +6,11 @@ export interface RecommendationResult {
   reason: string;
 }
 
+export interface RecommendationResponse {
+  keywords: string[];
+  results: RecommendationResult[];
+}
+
 // Helper to get active API config
 const getActiveApiConfig = () => {
   try {
