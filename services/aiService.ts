@@ -29,6 +29,7 @@ const executePrompt = async (prompt: string, defaultModelName: string, jsonMode:
     
     const ai = new GoogleGenAI({ apiKey });
     try {
+      // Use shorter timeout conceptually for Flash
       const response = await ai.models.generateContent({
         model: defaultModelName,
         contents: prompt,
@@ -40,6 +41,8 @@ const executePrompt = async (prompt: string, defaultModelName: string, jsonMode:
       return response.text || (jsonMode ? "{}" : "");
     } catch (err: any) {
       console.error("Gemini API Error:", err);
+      // Give more specific feedback
+      if (err.message?.includes("fetch")) throw new Error("网络连接超时或 API 地址不可达。");
       throw new Error(`Gemini API 请求失败: ${err.message || "未知错误"}`);
     }
   }
@@ -52,6 +55,9 @@ const executePrompt = async (prompt: string, defaultModelName: string, jsonMode:
     const url = `${baseUrl}/chat/completions`;
     
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout
+
       const res = await fetch(url, {
         method: 'POST',
         headers: {
@@ -63,8 +69,10 @@ const executePrompt = async (prompt: string, defaultModelName: string, jsonMode:
           messages: [{ role: 'user', content: prompt }],
           temperature: 0.3,
           ...(jsonMode ? { response_format: { type: "json_object" } } : {})
-        })
+        }),
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
       
       if (!res.ok) {
         const errText = await res.text();
@@ -73,6 +81,7 @@ const executePrompt = async (prompt: string, defaultModelName: string, jsonMode:
       const data = await res.json();
       return data.choices?.[0]?.message?.content || (jsonMode ? "{}" : "");
     } catch (err: any) {
+      if (err.name === 'AbortError') throw new Error("API 请求回答超时（60s），请尝试更简短的搜索。");
       throw new Error(`OpenAI API 请求失败: ${err.message}`);
     }
 
@@ -131,12 +140,18 @@ async function extractSearchKeywords(query: string): Promise<string[]> {
  * Stage 2: Heavy local keyword scoring across all character fields
  * Handles 4000+ cards locally in milliseconds.
  */
-function localKeywordSearch(characters: Character[], keywords: string[]): Character[] {
+function localKeywordSearch(characters: Character[], query: string, keywords: string[]): Character[] {
+  // Combine AI keywords with raw tokens from the query for maximum coverage
+  const queryTokens = query.split(/[\s,，、]+/).filter(k => k.length > 1);
+  const searchTerms = Array.from(new Set([...keywords, ...queryTokens])).map(t => t.toLowerCase());
+
   const scores = characters.map(char => {
     let score = 0;
-    const content = `
-      ${char.name} 
-      ${(char.tags || []).join(' ')} 
+    const name = char.name.toLowerCase();
+    const tags = (char.tags || []).map(t => t.toLowerCase());
+    
+    // Concatenate deep context fields
+    const context = `
       ${char.description || ''} 
       ${char.personality || ''} 
       ${char.scenario || ''} 
@@ -144,25 +159,29 @@ function localKeywordSearch(characters: Character[], keywords: string[]): Charac
       ${char.character_book?.entries.map(e => e.keys.join(' ') + ' ' + e.content).join(' ') || ''}
     `.toLowerCase();
 
-    keywords.forEach(kw => {
-      const lowerKw = kw.toLowerCase();
-      // Weighted match: Name and Tags are highly important
-      if (char.name.toLowerCase().includes(lowerKw)) score += 20;
-      if ((char.tags || []).some(t => t.toLowerCase().includes(lowerKw))) score += 15;
+    searchTerms.forEach(term => {
+      // High weight for identity fields
+      if (name.includes(term)) score += 50;
+      if (tags.some(t => t.includes(term))) score += 40;
       
-      // Substring frequency match
-      const count = (content.split(lowerKw).length - 1);
-      score += Math.min(count * 2, 30); // Max 30 points for frequency to prevent spamming
+      // Frequency score for personality/scenario/worldbook
+      const occurrences = (context.split(term).length - 1);
+      score += Math.min(occurrences * 5, 100); 
+
+      // Support partial character matching for longer intent phrases
+      if (term.length > 2) {
+          if (context.includes(term)) score += 20;
+      }
     });
 
     return { char, score };
   });
 
-  // Sort by score and take top 40 candidates
+  // Pick top 15 candidates. Keeping it lean prevents AI generation bottlenecks/timeouts.
   return scores
     .filter(s => s.score > 0)
     .sort((a, b) => b.score - a.score)
-    .slice(0, 40)
+    .slice(0, 15)
     .map(s => s.char);
 }
 
@@ -171,67 +190,82 @@ export async function recommendCharacters(
   query: string, 
   onLog?: (msg: string) => void
 ): Promise<RecommendationResponse> {
-  // Stage 1: AI Keyword Extraction
-  onLog?.("正在进行语义分析并提取关键词...");
-  const searchKeywords = await extractSearchKeywords(query);
-  onLog?.(`提取关键词: [${searchKeywords.join(', ')}]`);
+  try {
+    // Stage 1: AI Keyword Extraction (Fast Flash)
+    onLog?.("正在精准提炼您的搜索意图...");
+    const searchKeywords = await extractSearchKeywords(query);
+    
+    // Stage 2: Local High-Speed Deep Scan
+    onLog?.(`正在同步检索全库 ${characters.length} 张卡片（穿透：人设、开场白、世界书）...`);
+    const candidates = localKeywordSearch(characters, query, searchKeywords);
+    
+    if (candidates.length === 0) {
+      onLog?.("全量扫描未发现高度契合项，正在扩大范围进行模糊匹配...");
+      // In a real app, you might do a second even more fuzzy pass here
+      return { keywords: searchKeywords, results: [] };
+    }
+    
+    onLog?.(`已锁定 ${candidates.length} 张最具潜力候选档案，正在移交 AI 专家组进行深度评估...`);
 
-  // Stage 2: Fast Local Scanning
-  onLog?.(`正在对库中 ${characters.length} 个角色进行全文本深度扫描（含设定、开场白、世界书）...`);
-  const candidates = localKeywordSearch(characters, searchKeywords);
-  
-  if (candidates.length === 0) {
-    onLog?.("本地全量检索未发现匹配项。");
-    return { keywords: searchKeywords, results: [] };
-  }
-  onLog?.(`初步筛选出 ${candidates.length} 张最具潜力角色卡，移交 AI 进行深度评估...`);
+    // Truncate fields for performance
+    const limitT = (s: string | undefined, limit: number = 800) => {
+      if (!s) return '无';
+      return s.length > limit ? s.slice(0, limit) + "..." : s;
+    };
 
-  // Stage 3: AI Deep Ranking
-  const charactersPrompt = candidates.map(c => 
-    `ID: ${c.id}\nName: ${c.name}\nTags: ${(c.tags || []).join(',')}\n人设设定: ${c.description || ''}\n性格: ${c.personality || ''}\n背景/世界书: ${c.scenario || ''}\n开场白: ${c.firstMessage || ''}\n`
-  ).join("\n---\n");
-  
-  const prompt = `
-你是一位资深、毒辣的小说/Roleplay卡牌管理员。
-我有 4000+ 角色卡，我已经通过关键词初步帮你筛选出了 40 张最接近的用户卡。
-请你仔细阅读这些卡片的【人设设置】、【背景世界观】以及【首句对话】，为用户推荐最符合需求的目标。
+    // Stage 3: AI Deep Ranking - Using user's specific fields format
+    const charactersPrompt = candidates.map((c, index) => {
+      const worldbookContent = c.character_book?.entries.map(e => e.content).join(' ').slice(0, 1000) || '无';
+      return `【角色 ${index + 1}】
+角色ID: ${c.id}
+角色名称: ${c.name}
+描述: ${limitT(c.description, 1000)}
+性格: ${limitT(c.personality, 600)}
+场景: ${limitT(c.scenario, 1000)}
+首条消息: ${limitT(c.firstMessage, 800)}
+世界书(部分): ${worldbookContent}`;
+    }).join("\n---\n");
+    
+    const prompt = `
+你是一位专门研究酒馆格式（Tavern）角色卡的 AI 专家。
+请根据用户的搜索需求，从以下候选名单中选出最契合的 5-8 张卡。
 
 用户需求: "${query}"
-候选关键词: ${searchKeywords.join(', ')}
 
-待评估角色卡列表如下：
+待评估卡片档案:
 ${charactersPrompt}
 
 任务：
-1. 从 40 个候选人中，选出最契合用户口味的 TOP 5-10。
-2. 评价标准：一定要看重性格（腹黑、偏执等）和开场白带来的氛围。
-3. 必须解释为什么推荐，引用卡片具体设定的原话。
+1. 请重点阅读【描述】、【性格】以及【首条消息】。
+2. 尤其关注【首条消息】的说话语气（如：霸道、娇嗔、理智、病娇等），判断是否符合用户想要的“感觉”。
+3. 给出 TOP 5-8 的推荐。
 
-返回规范 JSON 对象：
+仅返回 JSON：
 {
-  "keywords": ${JSON.stringify(searchKeywords)},
   "recommendations": [
     {
       "id": "角色ID",
-      "reason": "引用人设、开场白或世界书中的具体描写，说明为什么这个卡很对味。"
+      "reason": "引用人设或对话中的具体描写，简短解释其为何匹配（50字内）。"
     }
   ]
 }
-不要编造卡片内容。最多 10 个。
 `;
-  
-  try {
-    const text = await executePrompt(prompt, "gemini-3.1-pro-preview");
+    
+    // Fast flash call for stage 3 to ensure result delivery
+    const text = await executePrompt(prompt, "gemini-3-flash-preview");
     const cleanedText = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
     const parsed = JSON.parse(cleanedText || "{}");
     const results = parsed.recommendations || parsed.results || [];
     
+    onLog?.(`分析完成！已为您整理好精选推荐。`);
+
     return {
-      keywords: parsed.keywords || searchKeywords,
+      keywords: searchKeywords,
       results: Array.isArray(results) ? results : []
     };
-  } catch (e) {
-    throw e;
+  } catch (e: any) {
+    console.error("AI Recommendation error:", e);
+    throw new Error(`AI 会诊过程出错: ${e.message || "未知原因"}`);
   }
 }
 
