@@ -1,6 +1,44 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Sparkles, RefreshCw, Eye, X } from 'lucide-react';
+import { loadImage } from '../services/imageService';
+
+const TarotAsyncAvatar: React.FC<{ charId: string; initialUrl?: string; alt: string; className?: string }> = ({ charId, initialUrl, alt, className }) => {
+    const [url, setUrl] = useState<string | undefined>(initialUrl?.startsWith('blob:') ? initialUrl : undefined);
+
+    useEffect(() => {
+        if (url && url.startsWith('blob:')) return; 
+        let mounted = true;
+        let objectUrl: string | null = null;
+        
+        loadImage(charId).then(blob => {
+            if (!mounted) return;
+            if (blob) {
+                objectUrl = URL.createObjectURL(blob);
+                setUrl(objectUrl);
+            }
+        });
+
+        return () => {
+            mounted = false;
+            if (objectUrl) URL.revokeObjectURL(objectUrl);
+        };
+    }, [charId]);
+
+    return (
+        <img 
+            src={url || `https://picsum.photos/seed/${charId}/400/400`} 
+            alt={alt} 
+            className={className} 
+            onError={(e) => {
+                const target = e.target as HTMLImageElement;
+                if (!target.src.includes('picsum.photos')) {
+                    target.src = `https://picsum.photos/seed/${charId}/400/400`;
+                }
+            }}
+        />
+    );
+};
 
 interface TarotCardDrawProps {
     characters: any[];
@@ -96,8 +134,9 @@ export function TarotCardDraw({ characters, onComplete, onJump, onRedraw, theme 
                                     {characters.map((char, index) => (
                                         <div key={char.id + index} className={`flex flex-col overflow-hidden rounded-3xl shadow-sm border ${isLight ? 'bg-white border-slate-200' : 'bg-[#2a2b30] border-white/10'}`}>
                                             <div className="w-full aspect-[4/5] relative bg-gray-900 overflow-hidden shrink-0">
-                                                <img 
-                                                    src={char.avatarUrl || `https://picsum.photos/seed/${char.id}/400/400`} 
+                                                <TarotAsyncAvatar 
+                                                    charId={char.id}
+                                                    initialUrl={char.avatarUrl}
                                                     alt={char.name} 
                                                     className="w-full h-full object-cover" 
                                                 />

@@ -84,20 +84,9 @@ function App() {
           await set('glass_tavern_characters_v1', parsed);
         }
         
-        // Load images from IndexedDB to fix blob URL expiration
-        const updatedCharacters = await Promise.all(parsed.map(async (char: Character) => {
-          try {
-            const blob = await loadImage(char.id);
-            if (blob) {
-              return { ...char, avatarUrl: URL.createObjectURL(blob) };
-            }
-          } catch (e) {
-            console.error(`Failed to load image for char ${char.id}`, e);
-          }
-          return char;
-        }));
-        
-        setCharacters(updatedCharacters);
+        // Do NOT aggressively load all object URLs into memory here (will crash with 4000+ cards).
+        // A dedicated AsyncAvatar component will lazily load from IDB on demand!
+        setCharacters(parsed);
       } catch (e) {
         console.error("Failed to load characters", e);
         setCharacters(DEFAULT_CHARACTERS);

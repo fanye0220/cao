@@ -7,9 +7,54 @@ import { parseCharacterCard, parseCharacterJson, exportCharacterData, exportBulk
 import { ApiConfigModal } from './ApiConfigModal';
 import { recommendCharacters, autoTagCharacter, autoTagCharactersBatch } from '../services/aiService';
 import { TarotCardDraw } from './TarotCardDraw';
+import { loadImage } from '../services/imageService';
 
 // Removed invalid module augmentation. We will cast props if needed or ignore the error for now as it's just for directory upload.
 // If needed, we can use a custom input component or just ignore the TS error on the input element locally.
+
+// Async lazy loading avatar component
+const AsyncAvatar: React.FC<{ charId: string; initialUrl?: string; alt: string; className?: string }> = ({ charId, initialUrl, alt, className }) => {
+    const [url, setUrl] = useState<string | undefined>(initialUrl?.startsWith('blob:') ? initialUrl : undefined);
+
+    useEffect(() => {
+        if (url && url.startsWith('blob:')) return; // Already loaded or pre-set imported image
+        
+        let objectUrl: string | null = null;
+        let mounted = true;
+        
+        loadImage(charId).then(blob => {
+            if (!mounted) return;
+            if (blob) {
+                objectUrl = URL.createObjectURL(blob);
+                setUrl(objectUrl);
+            }
+        }).catch(err => {
+            console.error("Failed to lazy load image for", charId, err);
+        });
+
+        return () => {
+            mounted = false;
+            if (objectUrl) {
+                URL.revokeObjectURL(objectUrl);
+            }
+        };
+    }, [charId]);
+
+    return (
+        <img 
+            src={url || `https://picsum.photos/seed/${charId}/400/400`} 
+            alt={alt} 
+            className={className}
+            loading="lazy" 
+            onError={(e) => {
+                const target = e.target as HTMLImageElement;
+                if (!target.src.includes('picsum.photos')) {
+                    target.src = `https://picsum.photos/seed/${charId}/400/400`;
+                }
+            }}
+        />
+    );
+};
 
 interface CharacterListProps {
   characters: Character[];
@@ -556,8 +601,12 @@ const CharacterList: React.FC<CharacterListProps> = ({
     const ids = new Set<string>();
     
     characters.forEach(c => {
-        const existing = seenNames.get(c.name) || [];
-        seenNames.set(c.name, [...existing, c.id]);
+        let existing = seenNames.get(c.name);
+        if (!existing) {
+            existing = [];
+            seenNames.set(c.name, existing);
+        }
+        existing.push(c.id);
     });
 
     seenNames.forEach((idsList) => {
@@ -671,17 +720,11 @@ const CharacterList: React.FC<CharacterListProps> = ({
         
         {/* Image Section (Top 65%) */}
         <div className="h-[65%] w-full relative overflow-hidden bg-gray-900">
-             <img 
-                src={char.avatarUrl || `https://picsum.photos/seed/${char.id}/400/400`} 
+             <AsyncAvatar 
+                charId={char.id}
+                initialUrl={char.avatarUrl}
                 alt={char.name} 
                 className="w-full h-full object-cover object-top transition-transform duration-700 group-hover:scale-105"
-                loading="lazy" 
-                onError={(e) => {
-                    const target = e.target as HTMLImageElement;
-                    if (!target.src.includes('picsum.photos')) {
-                        target.src = `https://picsum.photos/seed/${char.id}/400/400`;
-                    }
-                }}
             />
             {/* Dark gradient overlay */}
             <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/80 to-transparent pointer-events-none" />
@@ -1633,7 +1676,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
                       onChange={(e) => setItemsPerPage(Number(e.target.value))}
                       className={`rounded-xl text-xs font-bold py-2 px-3 outline-none focus:ring-2 focus:ring-rose-500/20 cursor-pointer shadow-sm transition-colors ${theme === 'light' ? 'bg-white/50 border border-white/50 hover:bg-white/70 text-slate-800' : 'bg-black/50 border border-white/10 text-white hover:bg-black/70'}`}
                   >
-                      {[10, 20, 30, 50, 100, 500, 1000].map(size => (
+                      {[10, 20, 30, 50, 100, 250, 500, 1000].map(size => (
                           <option key={size} value={size} className="bg-white text-black dark:bg-slate-800 dark:text-white">{size}</option>
                       ))}
                   </select>
@@ -1877,7 +1920,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
                               <div className="flex gap-3">
                                   {/* Avatar */}
                                   <div className="w-20 lg:w-24 aspect-[4/5] relative rounded-2xl overflow-hidden shrink-0 group cursor-pointer" onClick={() => { onSelect(item.char); }}>
-                                      <img src={item.char.avatarUrl || `https://picsum.photos/seed/${item.char.id}/400/400`} alt={item.char.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                                      <AsyncAvatar charId={item.char.id} initialUrl={item.char.avatarUrl} alt={item.char.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
                                       <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                                           <span className="text-white font-bold text-[10px] bg-black/50 px-2 py-1 rounded-full flex items-center gap-1"><BookOpen size={12}/> 查看</span>
                                       </div>
@@ -2181,7 +2224,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
                                   return (
                                       <div key={item.char.id + idx} className={`p-3 rounded-lg flex flex-col gap-3 ${theme === 'light' ? 'bg-slate-50 border border-slate-200' : 'bg-black/20 border border-white/5'}`}>
                                           <div className="flex items-center gap-2 border-b pb-2 mb-1 border-opacity-10 border-white">
-                                              <img src={item.char.avatarUrl} className="w-8 h-8 rounded-full object-cover" />
+                                              <AsyncAvatar charId={item.char.id} initialUrl={item.char.avatarUrl} alt={item.char.name} className="w-8 h-8 rounded-full object-cover" />
                                               <span className={`font-bold text-sm ${theme === 'light' ? 'text-slate-800' : 'text-slate-200'}`}>{item.char.name}</span>
                                           </div>
                                           <div className="flex flex-col gap-3">
@@ -2380,7 +2423,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
                                     <div key={char.id} className="flex flex-col gap-6">
                                         {/* 头部信息 */}
                                         <div className={`p-5 rounded-3xl border shadow-sm flex gap-5 items-start ${theme === 'light' ? 'bg-white border-gray-200' : 'bg-slate-800 border-white/10'}`}>
-                                             <img src={char.avatarUrl} className={`w-20 h-20 rounded-xl object-cover border ${theme === 'light' ? 'bg-gray-100 border-gray-100' : 'bg-slate-700 border-white/10'}`} />
+                                             <AsyncAvatar charId={char.id} initialUrl={char.avatarUrl} alt={char.name} className={`w-20 h-20 rounded-xl object-cover border ${theme === 'light' ? 'bg-gray-100 border-gray-100' : 'bg-slate-700 border-white/10'}`} />
                                              <div className="flex-1 min-w-0">
                                                  <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Card {isLeft ? 'A (Keep Left)' : 'B (Keep Right)'}</div>
                                                  <div className="text-lg font-black truncate">{char.name}</div>
@@ -2543,8 +2586,9 @@ const CharacterList: React.FC<CharacterListProps> = ({
           >
             <div className="flex flex-col gap-6">
                 <div className="flex gap-6">
-                    <img 
-                        src={viewCharacter.avatarUrl} 
+                    <AsyncAvatar 
+                        charId={viewCharacter.id}
+                        initialUrl={viewCharacter.avatarUrl}
                         alt={viewCharacter.name} 
                         className="w-32 h-48 object-cover rounded-xl shadow-lg shrink-0 bg-gray-900" 
                     />

@@ -30,6 +30,26 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
     cardUrl: initialData?.cardUrl || initialData?.originalFilename || '',
     extra_qr_data: {}
   });
+
+  // Lazily load avatar if we received an empty one
+  React.useEffect(() => {
+     let mounted = true;
+     let tempUrl: string | null = null;
+     if (initialData && initialData.id && (!initialData.avatarUrl || !initialData.avatarUrl.startsWith('blob:'))) {
+         import('../services/imageService').then(({ loadImage }) => {
+             loadImage(initialData.id!).then(blob => {
+                 if (mounted && blob) {
+                     tempUrl = URL.createObjectURL(blob);
+                     setFormData(prev => ({ ...prev, avatarUrl: tempUrl as string }));
+                 }
+             });
+         });
+     }
+     return () => {
+         mounted = false;
+         if (tempUrl) URL.revokeObjectURL(tempUrl);
+     }
+  }, [initialData]);
   
   const [qrFileName, setQrFileName] = useState<string>(initialData?.qrList && initialData.qrList.length > 0 ? 'imported_config.json' : '');
   
@@ -1256,8 +1276,8 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
                                                     </label>
                                                     <input 
                                                         readOnly={!isEditingWorldInfo}
-                                                        value={currentEntry.keys?.join(', ') || ''}
-                                                        onChange={(e) => setTempWorldInfo({...tempWorldInfo, keys: e.target.value.split(',').map(k => k.trim()).filter(Boolean)})}
+                                                        value={(currentEntry.keys || currentEntry.key || []).join(', ')}
+                                                        onChange={(e) => setTempWorldInfo({...tempWorldInfo, keys: e.target.value.split(',').map(k => k.trim()).filter(Boolean), key: e.target.value.split(',').map(k => k.trim()).filter(Boolean)})}
                                                         className={`w-full rounded-xl px-4 py-3 text-sm outline-none transition-all font-mono
                                                             ${theme === 'light' ? 'bg-white/50 border border-slate-200 text-slate-800 focus:bg-white' : 'bg-black/20 border border-white/10 text-white focus:bg-black/40'}
                                                             ${!isEditingWorldInfo ? 'opacity-80 cursor-default' : ''}`}
@@ -1290,8 +1310,8 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
                                                         type="checkbox" 
                                                         id="wi-enabled"
                                                         disabled={!isEditingWorldInfo}
-                                                        checked={currentEntry.enabled !== false}
-                                                        onChange={(e) => setTempWorldInfo({...tempWorldInfo, enabled: e.target.checked})}
+                                                        checked={(currentEntry.enabled !== false) && (currentEntry.disable !== true)}
+                                                        onChange={(e) => setTempWorldInfo({...tempWorldInfo, enabled: e.target.checked, disable: !e.target.checked})}
                                                         className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                                                     />
                                                     <label htmlFor="wi-enabled" className={`text-sm ${theme === 'light' ? 'text-slate-600' : 'text-gray-300'}`}>启用 (Enabled)</label>
@@ -1312,8 +1332,8 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
                                                     <input 
                                                         type="number"
                                                         readOnly={!isEditingWorldInfo}
-                                                        value={currentEntry.insertion_order ?? 50}
-                                                        onChange={(e) => setTempWorldInfo({...tempWorldInfo, insertion_order: parseInt(e.target.value) || 0})}
+                                                        value={currentEntry.insertion_order ?? currentEntry.order ?? 50}
+                                                        onChange={(e) => setTempWorldInfo({...tempWorldInfo, insertion_order: parseInt(e.target.value) || 0, order: parseInt(e.target.value) || 0})}
                                                         className={`w-full rounded-lg px-3 py-2 text-sm outline-none transition-all
                                                             ${theme === 'light' ? 'bg-white/50 border border-slate-200 text-slate-800' : 'bg-black/20 border border-white/10 text-white'}
                                                             ${!isEditingWorldInfo ? 'opacity-80 cursor-default' : ''}`}
@@ -1324,8 +1344,8 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
                                                     <input 
                                                         type="number"
                                                         readOnly={!isEditingWorldInfo}
-                                                        value={currentEntry.priority ?? 10}
-                                                        onChange={(e) => setTempWorldInfo({...tempWorldInfo, priority: parseInt(e.target.value) || 0})}
+                                                        value={currentEntry.priority ?? currentEntry.groupWeight ?? 10}
+                                                        onChange={(e) => setTempWorldInfo({...tempWorldInfo, priority: parseInt(e.target.value) || 0, groupWeight: parseInt(e.target.value) || 0})}
                                                         className={`w-full rounded-lg px-3 py-2 text-sm outline-none transition-all
                                                             ${theme === 'light' ? 'bg-white/50 border border-slate-200 text-slate-800' : 'bg-black/20 border border-white/10 text-white'}
                                                             ${!isEditingWorldInfo ? 'opacity-80 cursor-default' : ''}`}

@@ -1,6 +1,6 @@
 import { Character } from "../types";
 import JSZip from "jszip";
-import { saveImage } from "./imageService";
+import { saveImage, loadImage } from "./imageService";
 
 // Helper to read text from buffer using TextDecoder for UTF-8 support
 const readText = (buffer: Uint8Array, start: number, length: number): string => {
@@ -316,12 +316,14 @@ export const parseCharacterCard = async (file: File): Promise<Character> => {
       finalData = characterData.data;
   }
 
-  // Sanitize character_book to prevent crashes
+  // Deep copy character_book to avoid mutating originalDataObj
+  let characterBookCopy = undefined;
   if (finalData.character_book) {
-      if (finalData.character_book.entries && typeof finalData.character_book.entries === 'object' && !Array.isArray(finalData.character_book.entries)) {
-          finalData.character_book.entries = Object.values(finalData.character_book.entries);
-      } else if (!finalData.character_book.entries || !Array.isArray(finalData.character_book.entries)) {
-          finalData.character_book.entries = [];
+      characterBookCopy = JSON.parse(JSON.stringify(finalData.character_book));
+      if (characterBookCopy.entries && typeof characterBookCopy.entries === 'object' && !Array.isArray(characterBookCopy.entries)) {
+          characterBookCopy.entries = Object.values(characterBookCopy.entries);
+      } else if (!characterBookCopy.entries || !Array.isArray(characterBookCopy.entries)) {
+          characterBookCopy.entries = [];
       }
   }
 
@@ -352,7 +354,7 @@ export const parseCharacterCard = async (file: File): Promise<Character> => {
     creator: finalData.creator || "",
     character_version: finalData.character_version || "",
     extensions: finalData.extensions || {},
-    character_book: finalData.character_book,
+    character_book: characterBookCopy,
     tags: parsedTags, 
     avatarUrl: avatarUrl,
     qrList: finalData.qrList || [],
@@ -391,12 +393,14 @@ export const parseCharacterJson = async (file: File): Promise<Character> => {
     }
 
     // Sanitize character_book to prevent crashes and ensure array structure
+    let characterBookCopy = undefined;
     if (finalData.character_book) {
-        if (finalData.character_book.entries && typeof finalData.character_book.entries === 'object' && !Array.isArray(finalData.character_book.entries)) {
+        characterBookCopy = JSON.parse(JSON.stringify(finalData.character_book));
+        if (characterBookCopy.entries && typeof characterBookCopy.entries === 'object' && !Array.isArray(characterBookCopy.entries)) {
             // SillyTavern often stores entries as an object map: { "0": {...}, "1": {...} }
-            finalData.character_book.entries = Object.values(finalData.character_book.entries);
-        } else if (!finalData.character_book.entries || !Array.isArray(finalData.character_book.entries)) {
-            finalData.character_book.entries = [];
+            characterBookCopy.entries = Object.values(characterBookCopy.entries);
+        } else if (!characterBookCopy.entries || !Array.isArray(characterBookCopy.entries)) {
+            characterBookCopy.entries = [];
         }
     }
 
@@ -428,7 +432,7 @@ export const parseCharacterJson = async (file: File): Promise<Character> => {
         creator: finalData.creator || "",
         character_version: finalData.character_version || "",
         extensions: finalData.extensions || {},
-        character_book: finalData.character_book,
+        character_book: characterBookCopy,
         tags: parsedTags,
         avatarUrl: avatarUrl,
         qrList: finalData.qrList || [],
@@ -562,33 +566,55 @@ export const getTavernExportData = (character: Character) => {
 };
 
 export const createTavernPng = async (character: Character): Promise<Blob> => {
-  // 1. Load image onto canvas
-  const img = new Image();
-  img.crossOrigin = "anonymous";
-  img.src = character.avatarUrl;
+  let blob: Blob | null = null;
+  // Try IDB first
+  blob = await loadImage(character.id);
 
-  await new Promise((resolve, reject) => {
-    img.onload = resolve;
-    img.onerror = () => reject(new Error("无法加载图片，可能是跨域问题。请先上传一张本地图片作为头像。"));
-  });
+  if (!blob) {
+      if (character.avatarUrl && character.avatarUrl.startsWith('blob:')) {
+          blob = await fetch(character.avatarUrl).then(r => r.blob()).catch(() => null);
+      }
+      if (!blob) {
+          blob = await fetch(`https://picsum.photos/seed/${character.id}/400/400`).then(r => r.blob()).catch(() => null);
+      }
+  }
+  if (!blob) throw new Error("获取图片数据失败");
 
-  const canvas = document.createElement('canvas');
-  canvas.width = img.width;
-  canvas.height = img.height;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error("Canvas context failed");
-  ctx.drawImage(img, 0, 0);
+  let arrayBuffer = await blob.arrayBuffer();
+  let uint8Array = new Uint8Array(arrayBuffer);
 
-  // 2. Convert to Blob
-  const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
-  if (!blob) throw new Error("Failed to create PNG blob");
+  // Check if PNG
+  const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+  let isPng = uint8Array.length >= 8;
+  for (let i = 0; i < 8 && isPng; i++) {
+    if (uint8Array[i] !== signature[i]) isPng = false;
+  }
 
-  const arrayBuffer = await blob.arrayBuffer();
-  const uint8Array = new Uint8Array(arrayBuffer);
+  if (!isPng) {
+      // Use Canvas to convert to PNG as fallback
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.src = URL.createObjectURL(blob);
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+      });
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error("Canvas context failed");
+      ctx.drawImage(img, 0, 0);
+      URL.revokeObjectURL(img.src);
+      
+      const pngBlob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
+      if (!pngBlob) throw new Error("Failed to create PNG blob");
+      arrayBuffer = await pngBlob.arrayBuffer();
+      uint8Array = new Uint8Array(arrayBuffer);
+  }
 
   // 3. Prepare Metadata
   const exportData = getTavernExportData(character);
-
   const jsonStr = JSON.stringify(exportData);
   const base64Data = encodeBase64Utf8(jsonStr);
   const key = "chara";
@@ -611,22 +637,66 @@ export const createTavernPng = async (character: Character): Promise<Blob> => {
   const crc = crc32(crcInput);
   view.setUint32(4 + 4 + chunkLength, crc);
 
-  // 5. Insert Chunk
-  let iendOffset = -1;
-  const len = uint8Array.length;
-  for (let i = 0; i < len - 7; i++) {
-    if (uint8Array[i] === 0x49 && uint8Array[i+1] === 0x45 && uint8Array[i+2] === 0x4e && uint8Array[i+3] === 0x44) {
-       iendOffset = i - 4;
+  // 5. Parse existing PNG to remove previous chara chunks and find IEND
+  const chunksToKeep: Uint8Array[] = [];
+  chunksToKeep.push(uint8Array.slice(0, 8)); // Signature
+  let offset = 8;
+  const dataView = new DataView(arrayBuffer);
+  
+  while (offset < uint8Array.length) {
+    if (offset + 8 > uint8Array.length) break;
+    const length = dataView.getUint32(offset);
+    const type = readText(uint8Array, offset + 4, 4);
+    const totalChunkLength = length + 12;
+    
+    if (offset + totalChunkLength > uint8Array.length) {
+       chunksToKeep.push(uint8Array.slice(offset));
        break;
     }
+
+    if (type === 'tEXt' || type === 'zTXt' || type === 'iTXt') {
+        const chunkDataStart = offset + 8;
+        const chunkDataEnd = offset + 8 + length;
+        let nullSep = -1;
+        for (let i = chunkDataStart; i < chunkDataEnd; i++) {
+          if (uint8Array[i] === 0) { nullSep = i; break; }
+        }
+        if (nullSep !== -1) {
+            const kw = readText(uint8Array, chunkDataStart, nullSep - chunkDataStart).toLowerCase();
+            if (['chara', 'character', 'ccv3', 'tavern', 'sillytavern'].includes(kw)) {
+                offset += totalChunkLength;
+                continue; // Skip previous chara chunk
+            }
+        }
+    }
+
+    if (type === 'IEND') {
+        offset += totalChunkLength;
+        continue; // We will append our own IEND
+    }
+
+    chunksToKeep.push(uint8Array.slice(offset, offset + totalChunkLength));
+    offset += totalChunkLength;
   }
 
-  if (iendOffset === -1) throw new Error("Invalid PNG: No IEND found");
+  // Calculate total length
+  let finalLength = chunkBuffer.length;
+  for (const c of chunksToKeep) finalLength += c.length;
+  
+  const iendChunk = new Uint8Array([0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130]); // Pre-calculated IEND
+  finalLength += iendChunk.length;
 
-  const finalBuffer = new Uint8Array(uint8Array.length + chunkBuffer.length);
-  finalBuffer.set(uint8Array.slice(0, iendOffset), 0);
-  finalBuffer.set(chunkBuffer, iendOffset);
-  finalBuffer.set(uint8Array.slice(iendOffset), iendOffset + chunkBuffer.length);
+  const finalBuffer = new Uint8Array(finalLength);
+  let pos = 0;
+  for (const c of chunksToKeep) {
+      finalBuffer.set(c, pos);
+      pos += c.length;
+  }
+  // Insert new chara chunk
+  finalBuffer.set(chunkBuffer, pos);
+  pos += chunkBuffer.length;
+  // Insert IEND
+  finalBuffer.set(iendChunk, pos);
 
   return new Blob([finalBuffer], { type: 'image/png' });
 };
