@@ -325,6 +325,16 @@ export const parseCharacterCard = async (file: File): Promise<Character> => {
       } else if (!characterBookCopy.entries || !Array.isArray(characterBookCopy.entries)) {
           characterBookCopy.entries = [];
       }
+      
+      // Normalize keys for UI and export compatibility
+      if (characterBookCopy.entries) {
+          characterBookCopy.entries = characterBookCopy.entries.map((entry: any) => ({
+              ...entry,
+              keys: entry.keys || entry.key || [],
+              secondary_keys: entry.secondary_keys || entry.keysecondary || [],
+              enabled: entry.enabled !== undefined ? entry.enabled : (entry.disable !== undefined ? !entry.disable : true)
+          }));
+      }
   }
 
   // Create Object URL for the image to use as avatar
@@ -401,6 +411,16 @@ export const parseCharacterJson = async (file: File): Promise<Character> => {
             characterBookCopy.entries = Object.values(characterBookCopy.entries);
         } else if (!characterBookCopy.entries || !Array.isArray(characterBookCopy.entries)) {
             characterBookCopy.entries = [];
+        }
+
+        // Normalize keys for UI and export compatibility
+        if (characterBookCopy.entries) {
+            characterBookCopy.entries = characterBookCopy.entries.map((entry: any) => ({
+                ...entry,
+                keys: entry.keys || entry.key || [],
+                secondary_keys: entry.secondary_keys || entry.keysecondary || [],
+                enabled: entry.enabled !== undefined ? entry.enabled : (entry.disable !== undefined ? !entry.disable : true)
+            }));
         }
     }
 
@@ -493,8 +513,14 @@ export const exportQrData = (qrList: any[], extraData: any = {}, originalFilenam
 };
 
 export const getTavernExportData = (character: Character) => {
-  let character_book_export: any = { ...character.character_book };
+  let character_book_export: any = character.character_book ? { ...character.character_book } : undefined;
   
+  if (character_book_export) {
+      if (!character_book_export.name) {
+          character_book_export.name = character.name ? `${character.name} Worldbook` : "Worldbook";
+      }
+  }
+
   const original = character.originalData || {};
   let originalDataObj = original.data || original;
   

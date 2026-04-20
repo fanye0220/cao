@@ -224,7 +224,7 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
     reader.onload = (event) => {
       try {
         const json = JSON.parse(event.target?.result as string);
-        let importedEntries = [];
+        let importedEntries: any[] = [];
         if (json.entries && Array.isArray(json.entries)) {
             importedEntries = json.entries;
         } else if (json.entries && typeof json.entries === 'object') {
@@ -232,14 +232,22 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
         }
         
         if (importedEntries.length > 0) {
+          // Normalize keys for SillyTavern V2 format which expects `keys` and `secondary_keys`
+          importedEntries = importedEntries.map((entry: any) => ({
+              ...entry,
+              keys: entry.keys || entry.key || [],
+              secondary_keys: entry.secondary_keys || entry.keysecondary || [],
+              enabled: entry.enabled !== undefined ? entry.enabled : (entry.disable !== undefined ? !entry.disable : true)
+          }));
+
           setFormData(prev => {
             const currentBook = prev.character_book || { entries: [] };
             return {
               ...prev,
               character_book: {
                  ...currentBook,
-                 name: json.name || json.name || currentBook.name, // Try to get name from imported JSON
-                 description: json.description || json.description || currentBook.description,
+                 name: json.name || currentBook.name || 'Imported Worldbook', // Default name to prevent ST activation issues
+                 description: json.description || currentBook.description || '',
                  entries: importedEntries
               }
             };
