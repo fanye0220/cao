@@ -232,13 +232,26 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
         }
         
         if (importedEntries.length > 0) {
-          // Normalize keys for SillyTavern V2 format which expects `keys` and `secondary_keys`
-          importedEntries = importedEntries.map((entry: any) => ({
-              ...entry,
-              keys: entry.keys || entry.key || [],
-              secondary_keys: entry.secondary_keys || entry.keysecondary || [],
-              enabled: entry.enabled !== undefined ? entry.enabled : (entry.disable !== undefined ? !entry.disable : true)
-          }));
+          // Normalize keys for SillyTavern V2 and legacy format
+          importedEntries = importedEntries.map((entry: any) => {
+              const keys = entry.keys || entry.key || [];
+              const secondaryKeys = entry.secondary_keys || entry.keysecondary || [];
+              const isEnabled = entry.enabled !== undefined ? entry.enabled : (entry.disable !== undefined ? !entry.disable : true);
+              
+              return {
+                  ...entry,
+                  keys: keys,
+                  key: keys,
+                  secondary_keys: secondaryKeys,
+                  keysecondary: secondaryKeys,
+                  enabled: isEnabled,
+                  disable: !isEnabled,
+                  extensions: entry.extensions || {}
+              };
+          });
+
+          // Use json name, or file name if it's a raw entries dump
+          const newWbName = json.name || file.name.replace(/\.[^/.]+$/, "") || 'Imported Worldbook';
 
           setFormData(prev => {
             const currentBook = prev.character_book || { entries: [] };
@@ -246,14 +259,14 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
               ...prev,
               character_book: {
                  ...currentBook,
-                 name: json.name || currentBook.name || 'Imported Worldbook', // Default name to prevent ST activation issues
-                 description: json.description || currentBook.description || '',
+                 name: newWbName,
+                 description: json.description || '',
                  entries: importedEntries
               }
             };
           });
           setViewingWorldInfoIndex(0); // View the first entry of the newly imported book
-          alert(`成功导入 ${importedEntries.length} 个世界书条目！旧世界书已被替换。`);
+          alert(`成功导入 ${importedEntries.length} 个世界书条目！旧世界书已被替换为：${newWbName}`);
         } else {
           alert("无有效的世界书条目导入。");
         }

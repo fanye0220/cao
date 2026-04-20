@@ -519,40 +519,32 @@ export const getTavernExportData = (character: Character) => {
       if (!character_book_export.name) {
           character_book_export.name = character.name ? `${character.name} Worldbook` : "Worldbook";
       }
+      // Ensure all exported entries carry both legacy and V2 tags 
+      if (character_book_export.entries && Array.isArray(character_book_export.entries)) {
+          character_book_export.entries = character_book_export.entries.map((entry: any) => {
+              const keys = entry.keys || entry.key || [];
+              const secondaryKeys = entry.secondary_keys || entry.keysecondary || [];
+              const isEnabled = entry.enabled !== undefined ? entry.enabled : (entry.disable !== undefined ? !entry.disable : true);
+              
+              return {
+                  ...entry,
+                  keys: keys,
+                  key: keys,
+                  secondary_keys: secondaryKeys,
+                  keysecondary: secondaryKeys,
+                  enabled: isEnabled,
+                  disable: !isEnabled
+              };
+          });
+      }
   }
 
   const original = character.originalData || {};
-  let originalDataObj = original.data || original;
-  
-  // Try to preserve original character_book structure if it was an object map (SillyTavern style)
-  // ONLY if the new entries are somewhat the same or we just map everything to object if original was object
-  if (originalDataObj.character_book && 
-      originalDataObj.character_book.entries && 
-      !Array.isArray(originalDataObj.character_book.entries) && 
-      typeof originalDataObj.character_book.entries === 'object') {
-      
-      const entriesMap: Record<string, any> = {};
-      if (character_book_export && character_book_export.entries && Array.isArray(character_book_export.entries)) {
-          character_book_export.entries.forEach((entry: any, index: number) => {
-             // In sillyTavern, they usually have string keys like "0", "1"
-             entriesMap[String(entry.id ?? index)] = entry;
-          });
-      }
-      if (character_book_export) {
-          character_book_export = { ...character_book_export, entries: entriesMap };
-      }
-  }
-
-  // Add the character_book fields to originalDataObj if they were modified/reset
-  if (originalDataObj.character_book && !character.character_book) {
-      // User deleted character book
-      delete originalDataObj.character_book;
-  } else if (character.character_book) {
-      originalDataObj.character_book = character_book_export;
-  }
+  let originalDataObj = original.data || {}; 
 
   return {
-    ...original, // Include any top-level properties to preserve them
+    ...original, 
+    // Always map essential properties at root (V1)
     name: character.name,
     description: character.description,
     personality: character.personality,
@@ -563,8 +555,13 @@ export const getTavernExportData = (character: Character) => {
     system_tags: character.tags || [],
     spec: original.spec || "chara_card_v2",
     spec_version: original.spec_version || "2.0",
+    
+    // Wipe and replace legacy V1 root-level worldbook
+    character_book: character_book_export,
+
     data: {
-      ...originalDataObj, // Include nested properties
+      ...originalDataObj, 
+      // Replace V2 nested fields
       name: character.name,
       description: character.description,
       personality: character.personality,
@@ -575,17 +572,19 @@ export const getTavernExportData = (character: Character) => {
       system_prompt: character.system_prompt || "",
       post_history_instructions: character.post_history_instructions || "",
       tags: character.tags || [],
-      system_tags: character.tags || [], // Some clients use system_tags
+      system_tags: character.tags || [], 
       creator: character.creator || "",
       character_version: character.character_version || "",
       alternate_greetings: character.alternate_greetings || [],
-      character_book: character.character_book ? character_book_export : undefined,
       extensions: character.extensions || {},
       
-      // Custom fields for this app
+      // Wipe and replace V2 nested worldbook
+      character_book: character_book_export,
+      
+      // Keep QR and App-specific states
       qrList: character.qrList,
-      extra_qr_data: character.extra_qr_data, // Preserve original QR data
-      qrFileName: character.qrFileName, // Preserve QR filename
+      extra_qr_data: character.extra_qr_data, 
+      qrFileName: character.qrFileName, 
       sourceUrl: character.sourceUrl
     }
   };
