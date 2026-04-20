@@ -317,8 +317,12 @@ export const parseCharacterCard = async (file: File): Promise<Character> => {
   }
 
   // Sanitize character_book to prevent crashes
-  if (finalData.character_book && (!finalData.character_book.entries || !Array.isArray(finalData.character_book.entries))) {
-      finalData.character_book.entries = [];
+  if (finalData.character_book) {
+      if (finalData.character_book.entries && typeof finalData.character_book.entries === 'object' && !Array.isArray(finalData.character_book.entries)) {
+          finalData.character_book.entries = Object.values(finalData.character_book.entries);
+      } else if (!finalData.character_book.entries || !Array.isArray(finalData.character_book.entries)) {
+          finalData.character_book.entries = [];
+      }
   }
 
   // Create Object URL for the image to use as avatar
@@ -485,11 +489,38 @@ export const exportQrData = (qrList: any[], extraData: any = {}, originalFilenam
 };
 
 export const getTavernExportData = (character: Character) => {
-  let character_book_export = character.character_book;
+  let character_book_export: any = { ...character.character_book };
   
   const original = character.originalData || {};
   let originalDataObj = original.data || original;
   
+  // Try to preserve original character_book structure if it was an object map (SillyTavern style)
+  // ONLY if the new entries are somewhat the same or we just map everything to object if original was object
+  if (originalDataObj.character_book && 
+      originalDataObj.character_book.entries && 
+      !Array.isArray(originalDataObj.character_book.entries) && 
+      typeof originalDataObj.character_book.entries === 'object') {
+      
+      const entriesMap: Record<string, any> = {};
+      if (character_book_export && character_book_export.entries && Array.isArray(character_book_export.entries)) {
+          character_book_export.entries.forEach((entry: any, index: number) => {
+             // In sillyTavern, they usually have string keys like "0", "1"
+             entriesMap[String(entry.id ?? index)] = entry;
+          });
+      }
+      if (character_book_export) {
+          character_book_export = { ...character_book_export, entries: entriesMap };
+      }
+  }
+
+  // Add the character_book fields to originalDataObj if they were modified/reset
+  if (originalDataObj.character_book && !character.character_book) {
+      // User deleted character book
+      delete originalDataObj.character_book;
+  } else if (character.character_book) {
+      originalDataObj.character_book = character_book_export;
+  }
+
   return {
     ...original, // Include any top-level properties to preserve them
     name: character.name,
@@ -518,7 +549,7 @@ export const getTavernExportData = (character: Character) => {
       creator: character.creator || "",
       character_version: character.character_version || "",
       alternate_greetings: character.alternate_greetings || [],
-      character_book: character_book_export,
+      character_book: character.character_book ? character_book_export : undefined,
       extensions: character.extensions || {},
       
       // Custom fields for this app

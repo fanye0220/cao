@@ -256,8 +256,10 @@ const CharacterList: React.FC<CharacterListProps> = ({
   const processAutoTagQueue = async () => {
     while (autoTagStateRef.current === 'running') {
       const queue = autoTagQueueRef.current;
-      const pendingIndices = queue.map((q, idx) => ({q, idx}))
-        .filter(({q}) => q.status === 'pending' || (q.status === 'fail' && q.retries < 5))
+      const pendingItems = queue.map((q, idx) => ({q, idx})).filter(({q}) => q.status === 'pending');
+      const retryItems = queue.map((q, idx) => ({q, idx})).filter(({q}) => q.status === 'fail' && q.retries < 5);
+      
+      const pendingIndices = [...pendingItems, ...retryItems]
         .slice(0, 5)
         .map(x => x.idx);
 
@@ -2352,20 +2354,22 @@ const CharacterList: React.FC<CharacterListProps> = ({
                                                      </div>
                                                  )}
                                                  <div className="mt-3 flex gap-2">
-                                                     {!isLeft && otherChar.qrList && otherChar.qrList.length > 0 && (
+                                                     {!isLeft && ((otherChar.qrList && otherChar.qrList.length > 0) || (otherChar.tags && otherChar.tags.length > 0) || otherChar.sourceUrl) && (
                                                          <button onClick={() => {
-                                                             if (window.confirm(`确定要从左侧卡片获取 QR 配置吗？这会覆盖当前卡的 QR。`)) {
+                                                             if (window.confirm(`确定要从左侧卡片合并 QR、标签及来源链接配置吗？这会覆盖当前卡的 QR。`)) {
                                                                  if (onUpdate) {
                                                                      onUpdate({
                                                                          ...char,
-                                                                         qrList: otherChar.qrList,
-                                                                         extra_qr_data: otherChar.extra_qr_data,
-                                                                         qrFileName: otherChar.qrFileName
+                                                                         qrList: otherChar.qrList?.length ? otherChar.qrList : char.qrList,
+                                                                         extra_qr_data: otherChar.extra_qr_data || char.extra_qr_data,
+                                                                         qrFileName: otherChar.qrFileName || char.qrFileName,
+                                                                         tags: Array.from(new Set([...(char.tags || []), ...(otherChar.tags || [])])),
+                                                                         sourceUrl: otherChar.sourceUrl || char.sourceUrl
                                                                      });
-                                                                     alert("QR 转移成功！");
+                                                                     alert("扩展配置合并成功！");
                                                                  }
                                                              }
-                                                         }} className={`px-3 py-2 rounded-xl text-xs font-bold transition border ${theme === 'light' ? 'bg-purple-100 text-purple-700 hover:bg-purple-200 border-purple-300' : 'bg-purple-900/30 text-purple-400 hover:bg-purple-900/50 border-purple-800'}`} title="从左侧卡片转移快速回复">
+                                                         }} className={`px-3 py-2 rounded-xl text-xs font-bold transition border ${theme === 'light' ? 'bg-purple-100 text-purple-700 hover:bg-purple-200 border-purple-300' : 'bg-purple-900/30 text-purple-400 hover:bg-purple-900/50 border-purple-800'}`} title="从左侧卡片合并配置 (QR、标签、来源链接)">
                                                              <ArrowRight className="w-3.5 h-3.5" />
                                                          </button>
                                                      )}
@@ -2376,20 +2380,22 @@ const CharacterList: React.FC<CharacterListProps> = ({
                                                              setSelectedIds(new Set());
                                                          }
                                                      }} className={`flex-1 px-4 py-2 rounded-xl text-xs font-bold transition shadow-lg ${theme === 'light' ? 'bg-slate-800 text-white hover:bg-rose-500 shadow-gray-200' : 'bg-slate-700 text-white hover:bg-rose-600 shadow-black/50'}`}>保留此版本</button>
-                                                     {isLeft && otherChar.qrList && otherChar.qrList.length > 0 && (
+                                                     {isLeft && ((otherChar.qrList && otherChar.qrList.length > 0) || (otherChar.tags && otherChar.tags.length > 0) || otherChar.sourceUrl) && (
                                                          <button onClick={() => {
-                                                             if (window.confirm(`确定要从右侧卡片获取 QR 配置吗？这会覆盖当前卡的 QR。`)) {
+                                                             if (window.confirm(`确定要从右侧卡片合并 QR、标签及来源链接配置吗？这会覆盖当前卡的 QR。`)) {
                                                                  if (onUpdate) {
                                                                      onUpdate({
                                                                          ...char,
-                                                                         qrList: otherChar.qrList,
-                                                                         extra_qr_data: otherChar.extra_qr_data,
-                                                                         qrFileName: otherChar.qrFileName
+                                                                         qrList: otherChar.qrList?.length ? otherChar.qrList : char.qrList,
+                                                                         extra_qr_data: otherChar.extra_qr_data || char.extra_qr_data,
+                                                                         qrFileName: otherChar.qrFileName || char.qrFileName,
+                                                                         tags: Array.from(new Set([...(char.tags || []), ...(otherChar.tags || [])])),
+                                                                         sourceUrl: otherChar.sourceUrl || char.sourceUrl
                                                                      });
-                                                                     alert("QR 转移成功！");
+                                                                     alert("扩展配置合并成功！");
                                                                  }
                                                              }
-                                                         }} className={`px-3 py-2 rounded-xl text-xs font-bold transition border ${theme === 'light' ? 'bg-purple-100 text-purple-700 hover:bg-purple-200 border-purple-300' : 'bg-purple-900/30 text-purple-400 hover:bg-purple-900/50 border-purple-800'}`} title="从右侧卡片转移快速回复">
+                                                         }} className={`px-3 py-2 rounded-xl text-xs font-bold transition border ${theme === 'light' ? 'bg-purple-100 text-purple-700 hover:bg-purple-200 border-purple-300' : 'bg-purple-900/30 text-purple-400 hover:bg-purple-900/50 border-purple-800'}`} title="从右侧卡片合并配置 (QR、标签、来源链接)">
                                                              <ArrowLeft className="w-3.5 h-3.5" />
                                                          </button>
                                                      )}

@@ -212,16 +212,20 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
         }
         
         if (importedEntries.length > 0) {
-          setFormData(prev => ({
-            ...prev,
-            character_book: {
-              ...prev.character_book,
-              name: json.name || prev.character_book?.name,
-              description: json.description || prev.character_book?.description,
-              entries: [...(prev.character_book?.entries || []), ...importedEntries]
-            }
-          }));
-          alert(`成功导入 ${importedEntries.length} 个世界书条目！`);
+          setFormData(prev => {
+            const currentBook = prev.character_book || { entries: [] };
+            return {
+              ...prev,
+              character_book: {
+                 ...currentBook,
+                 name: json.name || json.name || currentBook.name, // Try to get name from imported JSON
+                 description: json.description || json.description || currentBook.description,
+                 entries: importedEntries
+              }
+            };
+          });
+          setViewingWorldInfoIndex(0); // View the first entry of the newly imported book
+          alert(`成功导入 ${importedEntries.length} 个世界书条目！旧世界书已被替换。`);
         } else {
           alert("无有效的世界书条目导入。");
         }
