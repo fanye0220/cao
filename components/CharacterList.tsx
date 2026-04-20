@@ -985,13 +985,14 @@ const CharacterList: React.FC<CharacterListProps> = ({
     if (!groupedCharacters) return;
     
     const idsToDelete = new Set<string>();
+    const charsToUpdate: Character[] = [];
     
     groupedCharacters.forEach(([name, chars]) => {
       // Find identical subgroups based on core content
       const contentMap = new Map<string, Character[]>();
       chars.forEach(c => {
         // Exclude properties that could vary without changing the core meaning:
-        // id, importDate, fileLastModified, avatarUrl, cardUrl
+        // id, importDate, fileLastModified, avatarUrl, cardUrl, tags, alternate_greetings, etc.
         const hashObj = {
           firstMessage: c.firstMessage || '',
           description: c.description || '',
@@ -1001,8 +1002,6 @@ const CharacterList: React.FC<CharacterListProps> = ({
           system_prompt: c.system_prompt || '',
           creator_notes: c.creator_notes || '',
           post_history_instructions: c.post_history_instructions || '',
-          tags: Array.isArray(c.tags) ? [...c.tags].sort() : [],
-          alternate_greetings: Array.isArray(c.alternate_greetings) ? [...c.alternate_greetings] : [],
         };
         const contentHash = JSON.stringify(hashObj);
         if (!contentMap.has(contentHash)) contentMap.set(contentHash, []);
@@ -1017,22 +1016,61 @@ const CharacterList: React.FC<CharacterListProps> = ({
             const timeB = Math.max(b.updatedAt || 0, b.fileLastModified || 0, b.importDate || 0);
             return timeB - timeA;
           });
-          // Keep sorted[0], mark rest for deletion
+          
+          let keptChar = { ...sorted[0] };
+          let needsUpdate = false;
+          
+          // Keep sorted[0], mark rest for deletion & merge info into sorted[0]
           for (let i = 1; i < sorted.length; i++) {
             idsToDelete.add(sorted[i].id);
+            const oldChar = sorted[i];
+
+            // Merge QR
+            if (oldChar.qrList && oldChar.qrList.length > 0 && (!keptChar.qrList || keptChar.qrList.length === 0)) {
+                keptChar.qrList = oldChar.qrList;
+                keptChar.extra_qr_data = oldChar.extra_qr_data;
+                keptChar.qrFileName = oldChar.qrFileName;
+                needsUpdate = true;
+            }
+            // Merge Source URL
+            if (oldChar.sourceUrl && !keptChar.sourceUrl) {
+                keptChar.sourceUrl = oldChar.sourceUrl;
+                needsUpdate = true;
+            }
+            // Merge Tags
+            if (oldChar.tags && oldChar.tags.length > 0) {
+                const existingTags = keptChar.tags || [];
+                const mergedTags = Array.from(new Set([...existingTags, ...oldChar.tags]));
+                if (mergedTags.length > existingTags.length) {
+                    keptChar.tags = mergedTags;
+                    needsUpdate = true;
+                }
+            }
+          }
+          
+          if (needsUpdate) {
+             charsToUpdate.push(keptChar);
           }
         }
       });
     });
     
     if (idsToDelete.size === 0) {
-      alert("没有发现【名称且核心内容完全相同】的旧版卡片。\n现有的同名重复卡片似乎内容均有差异，需要您手动鉴别。");
+      alert("没有发现【名称且核心内容相同 (忽略标签和QR差异)】的旧版卡片。\n现有的同名重复卡片似乎核心文案均有差异，需要您手动鉴别。");
       return;
+    }
+    
+    // Automatically apply merged data if any
+    if (charsToUpdate.length > 0 && onUpdateBatch) {
+       onUpdateBatch(charsToUpdate);
     }
     
     setSelectedIds(prev => new Set([...prev, ...Array.from(idsToDelete)]));
     setIsSelectionMode(true);
-    alert(`已为您选中 ${idsToDelete.size} 张【名称且核心内容完全一致】的旧版重复卡片。\n您可以预览并确认无误后，点击头部的垃圾桶图标进行批量删除。`);
+    alert(`已为您选中 ${idsToDelete.size} 张【名称且核心内容完全一致】的旧版重复卡片。
+这些旧卡的 QR、来源链接、标签已自动合并到了最新版卡片中！
+
+您可以预览并确认无误后，点击头部的垃圾桶图标进行批量删除。`);
   };
 
   const textColor = theme === 'light' ? 'text-slate-800' : 'text-white';
