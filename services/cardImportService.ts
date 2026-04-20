@@ -767,99 +767,101 @@ export const exportBulkCharacters = async (characters: Character[], collections:
     const zip = new JSZip();
     const timestamp = new Date().toISOString().slice(0,10);
     
-    for (const char of characters) {
-        // 1. Determine Filename
-        let filename = char.originalFilename;
-        if (!filename) {
-            const ext = char.importFormat === 'json' ? 'json' : 'png';
-            const safeName = char.name.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_').toLowerCase();
-            filename = `${safeName}.${ext}`;
-        }
-
-        // Ensure filename has correct extension based on format
-        const isPng = filename.toLowerCase().endsWith('.png');
-        const isJson = filename.toLowerCase().endsWith('.json');
+    // Process in batches to avoid overwhelming memory and parallelize IDB reads
+    const BATCH_SIZE = 50;
+    
+    for (let i = 0; i < characters.length; i += BATCH_SIZE) {
+        const batch = characters.slice(i, i + BATCH_SIZE);
         
-        // If import format mismatch with filename extension, trust importFormat? 
-        // Or just trust filename? Let's trust importFormat if available, otherwise filename.
-        // Actually, user said "import what export what".
-        // If importFormat is 'png', we export PNG.
-        
-        let fileData: Blob | string;
-        let finalFilename = filename;
+        await Promise.all(batch.map(async (char) => {
+            // 1. Determine Filename
+            let filename = char.originalFilename;
+            if (!filename) {
+                const ext = char.importFormat === 'json' ? 'json' : 'png';
+                const safeName = char.name.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '_').toLowerCase();
+                filename = `${safeName}.${ext}`;
+            }
 
-        if (char.importFormat === 'json') {
-            const exportData = getTavernExportData(char);
-            fileData = JSON.stringify(exportData, null, 2);
-            if (!isJson) finalFilename = filename.replace(/\.[^/.]+$/, "") + ".json";
-        } else {
-            // Default to PNG
-            try {
-                fileData = await createTavernPng(char);
-                if (!isPng) finalFilename = filename.replace(/\.[^/.]+$/, "") + ".png";
-            } catch (e) {
-                console.error(`Failed to create PNG for ${char.name}, falling back to JSON`, e);
+            // Ensure filename has correct extension based on format
+            const isPng = filename.toLowerCase().endsWith('.png');
+            const isJson = filename.toLowerCase().endsWith('.json');
+            
+            let fileData: Blob | string;
+            let finalFilename = filename;
+
+            if (char.importFormat === 'json') {
                 const exportData = getTavernExportData(char);
                 fileData = JSON.stringify(exportData, null, 2);
-                finalFilename = filename.replace(/\.[^/.]+$/, "") + ".json";
-            }
-        }
-
-        // 2. Determine Folder Path
-        // Priority: Collection > (QR + Card) > Single Card
-        
-        // Find collection folder
-        let collectionFolder = "";
-        if (char.tags) {
-            const foundCollection = char.tags.find(t => collections.includes(t));
-            if (foundCollection) {
-                collectionFolder = foundCollection;
-            }
-        }
-
-        // Check for QR
-        const hasQr = char.qrList && char.qrList.length > 0;
-        
-        let targetFolder = zip;
-        if (collectionFolder) {
-            targetFolder = zip.folder(collectionFolder) || zip;
-        }
-
-        if (hasQr) {
-            // Create subfolder for this character
-            // Use character name for folder name, or filename without extension
-            const charFolderName = finalFilename.replace(/\.[^/.]+$/, "");
-            const charFolder = targetFolder.folder(charFolderName);
-            
-            if (charFolder) {
-                charFolder.file(finalFilename, fileData);
-                
-                // Export QR
-                const isExtraDataEmpty = !char.extra_qr_data || Array.isArray(char.extra_qr_data) || Object.keys(char.extra_qr_data).length === 0;
-                const qrExportData = isExtraDataEmpty ? {
-                    version: 2,
-                    name: `${char.name} QR`,
-                    qrList: char.qrList
-                } : {
-                    ...char.extra_qr_data,
-                    qrList: char.qrList
-                };
-                // QR filename: usually same base name + _qr.json? Or just qr.json?
-                // User didn't specify, but "QR + Card" implies they go together.
-                // Let's use original filename base + _qr.json
-                let qrFilename = char.qrFileName || finalFilename.replace(/\.[^/.]+$/, "") + "_qr.json";
-                if (!qrFilename.endsWith('.json')) {
-                    qrFilename += '.json';
+                if (!isJson) finalFilename = filename.replace(/\.[^/.]+$/, "") + ".json";
+            } else {
+                // Default to PNG
+                try {
+                    fileData = await createTavernPng(char);
+                    if (!isPng) finalFilename = filename.replace(/\.[^/.]+$/, "") + ".png";
+                } catch (e) {
+                    console.error(`Failed to create PNG for ${char.name}, falling back to JSON`, e);
+                    const exportData = getTavernExportData(char);
+                    fileData = JSON.stringify(exportData, null, 2);
+                    finalFilename = filename.replace(/\.[^/.]+$/, "") + ".json";
                 }
-                charFolder.file(qrFilename, JSON.stringify(qrExportData, null, 2));
             }
-        } else {
-            // Single card, put directly in collection folder (or root)
-            targetFolder.file(finalFilename, fileData);
-        }
+
+            // 2. Determine Folder Path
+            // Priority: Collection > (QR + Card) > Single Card
+            
+            // Find collection folder
+            let collectionFolder = "";
+            if (char.tags) {
+                const foundCollection = char.tags.find(t => collections.includes(t));
+                if (foundCollection) {
+                    collectionFolder = foundCollection;
+                }
+            }
+
+            // Check for QR
+            const hasQr = char.qrList && char.qrList.length > 0;
+            
+            let targetFolder = zip;
+            if (collectionFolder) {
+                targetFolder = zip.folder(collectionFolder) || zip;
+            }
+
+            if (hasQr) {
+                // Create subfolder for this character
+                const charFolderName = finalFilename.replace(/\.[^/.]+$/, "");
+                const charFolder = targetFolder.folder(charFolderName);
+                
+                if (charFolder) {
+                    charFolder.file(finalFilename, fileData);
+                    
+                    // Export QR
+                    const isExtraDataEmpty = !char.extra_qr_data || Array.isArray(char.extra_qr_data) || Object.keys(char.extra_qr_data).length === 0;
+                    const qrExportData = isExtraDataEmpty ? {
+                        version: 2,
+                        name: `${char.name} QR`,
+                        qrList: char.qrList
+                    } : {
+                        ...char.extra_qr_data,
+                        qrList: char.qrList
+                    };
+                    let qrFilename = char.qrFileName || finalFilename.replace(/\.[^/.]+$/, "") + "_qr.json";
+                    if (!qrFilename.endsWith('.json')) {
+                        qrFilename += '.json';
+                    }
+                    charFolder.file(qrFilename, JSON.stringify(qrExportData, null, 2));
+                }
+            } else {
+                // Single card, put directly in collection folder (or root)
+                targetFolder.file(finalFilename, fileData);
+            }
+        }));
     }
 
-    const content = await zip.generateAsync({ type: "blob" });
+    // Set compression to STORE (0) to massively speed up zip generation for pre-compressed PNG files
+    const content = await zip.generateAsync({ 
+        type: "blob", 
+        compression: "STORE" 
+    });
     downloadBlob(content, `tavern_export_${timestamp}.zip`);
 };
 
