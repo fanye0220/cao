@@ -210,6 +210,8 @@ const CharacterList: React.FC<CharacterListProps> = ({
   const [showTagFilterModal, setShowTagFilterModal] = useState(false);
   const [tagFilterMode, setTagFilterMode] = useState<'view' | 'edit'>('view');
 
+  const [tagSearchQuery, setTagSearchQuery] = useState('');
+
   // AI Features State
   const [showAIRecommendModal, setShowAIRecommendModal] = useState(false);
   const [showAutoTagModal, setShowAutoTagModal] = useState(false);
@@ -1387,25 +1389,50 @@ const CharacterList: React.FC<CharacterListProps> = ({
                 {/* Tag Filter Popover */}
                 {showTagFilterModal && (
                     <div className={`absolute top-full mt-2 right-0 w-[400px] z-[150] rounded-2xl shadow-2xl border animate-in slide-in-from-top-4 fade-in duration-200 overflow-hidden ${theme === 'light' ? 'bg-white border-slate-200/50' : 'bg-gray-900 border-white/10'}`}>
-                     <div className={`px-4 py-3 border-b flex justify-between items-center ${theme === 'light' ? 'border-slate-100 bg-slate-50/50' : 'border-white/10 bg-white/5'}`}>
-                         <span className={`font-bold text-sm flex items-center gap-2 ${theme === 'light' ? 'text-slate-700' : 'text-slate-200'}`}>
-                             <Tag size={14} className="opacity-70" /> 标签筛选
-                         </span>
-                         <div className="flex items-center gap-2">
-                             {activeFilter.type === 'tag' && activeFilter.value && (
+                     <div className={`flex flex-col border-b ${theme === 'light' ? 'border-slate-100 bg-slate-50/80' : 'border-white/10 bg-white/5'} backdrop-blur-md`}>
+                         <div className="px-4 py-3 flex justify-between items-center">
+                             <span className={`font-bold text-sm flex items-center gap-2 ${theme === 'light' ? 'text-slate-700' : 'text-slate-200'}`}>
+                                 <Tag size={14} className="opacity-70" /> 标签管理
+                             </span>
+                             <div className="flex items-center gap-2">
+                                 {activeFilter.type === 'tag' && activeFilter.value && (
+                                     <button 
+                                         onClick={() => setActiveFilter({ type: 'all' })}
+                                         className={`text-xs font-bold px-2.5 py-1.5 rounded-lg transition-colors ${theme === 'light' ? 'text-slate-500 hover:bg-slate-200/50' : 'text-slate-400 hover:bg-white/5'}`}
+                                     >
+                                         清除筛选
+                                     </button>
+                                 )}
                                  <button 
-                                     onClick={() => setActiveFilter({ type: 'all' })}
-                                     className={`text-sm tracking-wide font-bold px-3 py-1.5 rounded transition-colors ${theme === 'light' ? 'text-slate-500 hover:bg-slate-200/50' : 'text-slate-400 hover:bg-white/5'}`}
+                                   onClick={() => setTagFilterMode(tagFilterMode === 'view' ? 'edit' : 'view')}
+                                   className={`text-xs font-bold px-2.5 py-1.5 rounded-lg transition-colors ${theme === 'light' ? 'text-slate-700 bg-slate-200/50 hover:bg-slate-200' : 'text-gray-200 bg-white/10 hover:bg-white/20'}`}
                                  >
-                                     清除选中
+                                   {tagFilterMode === 'view' ? '编辑模式' : '完成编辑'}
                                  </button>
-                             )}
-                             <button 
-                               onClick={() => setTagFilterMode(tagFilterMode === 'view' ? 'edit' : 'view')}
-                               className={`text-sm tracking-wide font-bold px-3 py-1.5 rounded transition-colors ${theme === 'light' ? 'text-slate-700 bg-slate-200/50 hover:bg-slate-200' : 'text-gray-200 bg-white/10 hover:bg-white/20'}`}
-                             >
-                               {tagFilterMode === 'view' ? '编辑标签' : '完成编辑'}
-                             </button>
+                             </div>
+                         </div>
+                         <div className="px-3 pb-3">
+                             <div className={`relative flex items-center w-full rounded-xl border transition-all ${theme === 'light' ? 'bg-white border-slate-200 hover:border-slate-300 focus-within:border-blue-500 focus-within:ring-4 focus-within:ring-blue-500/10' : 'bg-[#0f1117] border-white/10 hover:border-white/20 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/20 shadow-inner'}`}>
+                                 <div className="pl-3 py-2 flex items-center pointer-events-none opacity-50">
+                                     <Search size={14} />
+                                 </div>
+                                 <input
+                                     type="text"
+                                     placeholder="搜索特定标签..."
+                                     value={tagSearchQuery}
+                                     onChange={(e) => setTagSearchQuery(e.target.value)}
+                                     className="w-full bg-transparent border-none outline-none px-2 py-2 text-[13px] font-medium placeholder-opacity-50"
+                                     style={{ color: 'inherit' }}
+                                 />
+                                 {tagSearchQuery && (
+                                     <button 
+                                         onClick={() => setTagSearchQuery('')} 
+                                         className="pr-3 pl-1 py-2 flex items-center opacity-40 hover:opacity-100 transition-opacity"
+                                     >
+                                         <X size={14} />
+                                     </button>
+                                 )}
+                             </div>
                          </div>
                      </div>
                      <div className="p-4 max-h-[400px] overflow-y-auto custom-scrollbar">
@@ -1413,7 +1440,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
                             {tagFilterMode === 'view' ? (
                                 <>
                                     <div className="flex flex-wrap gap-2">
-                                        {allTags.map(tag => (
+                                        {allTags.filter(t => !tagSearchQuery.trim() || t.toLowerCase().includes(tagSearchQuery.toLowerCase())).map(tag => (
                                             <button
                                                 key={tag}
                                                 onClick={() => setActiveFilter({ type: 'tag', value: tag })}
@@ -1426,14 +1453,16 @@ const CharacterList: React.FC<CharacterListProps> = ({
                                                 {tag}
                                             </button>
                                         ))}
-                                        {allTags.length === 0 && (
-                                            <div className="w-full text-center py-8 text-sm opacity-50">暂无可用的标签</div>
+                                        {allTags.filter(t => !tagSearchQuery.trim() || t.toLowerCase().includes(tagSearchQuery.toLowerCase())).length === 0 && (
+                                            <div className="w-full text-center py-8 text-sm opacity-50">
+                                                {tagSearchQuery ? '未找到匹配的标签' : '暂无可用的标签'}
+                                            </div>
                                         )}
                                     </div>
                                 </>
                             ) : (
                                 <div className="flex flex-wrap gap-2">
-                                    {allTags.map(tag => (
+                                    {allTags.filter(t => !tagSearchQuery.trim() || t.toLowerCase().includes(tagSearchQuery.toLowerCase())).map(tag => (
                                         <div key={tag} className={`flex items-center gap-1 py-1 pl-3 pr-1.5 rounded-lg border text-sm ${theme === 'light' ? 'bg-white border-slate-200 text-slate-700' : 'bg-transparent border-white/20 text-gray-300'}`}>
                                             {editingTag === tag ? (
                                                 <input
@@ -1459,8 +1488,10 @@ const CharacterList: React.FC<CharacterListProps> = ({
                                             )}
                                         </div>
                                     ))}
-                                    {allTags.length === 0 && (
-                                        <div className="w-full text-center py-8 text-sm opacity-50">暂无可用的标签</div>
+                                    {allTags.filter(t => !tagSearchQuery.trim() || t.toLowerCase().includes(tagSearchQuery.toLowerCase())).length === 0 && (
+                                        <div className="w-full text-center py-8 text-sm opacity-50">
+                                            {tagSearchQuery ? '未找到匹配的标签' : '暂无可用的标签'}
+                                        </div>
                                     )}
                                 </div>
                             )}
