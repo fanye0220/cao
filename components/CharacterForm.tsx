@@ -14,6 +14,8 @@ interface CharacterFormProps {
 }
 
 const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCancel, onDelete, theme }) => {
+  const [isAvatarManuallyChanged, setIsAvatarManuallyChanged] = useState(false);
+
   const [formData, setFormData] = useState<Partial<Character>>(initialData || {
     name: '',
     description: '',
@@ -105,6 +107,7 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      setIsAvatarManuallyChanged(true);
       setFormData(prev => ({ 
           ...prev, 
           avatarUrl: URL.createObjectURL(file)
@@ -329,7 +332,7 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
       const fieldsToCompare: (keyof Character)[] = [
           'name', 'description', 'personality', 'firstMessage', 'scenario',
           'mes_example', 'creator_notes', 'system_prompt', 'post_history_instructions',
-          'creator', 'character_version', 'avatarUrl', 'sourceUrl', 'originalFilename'
+          'creator', 'character_version', 'sourceUrl', 'originalFilename'
       ];
 
       for (const field of fieldsToCompare) {
@@ -337,6 +340,9 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
               return true;
           }
       }
+
+      // Check if avatar was manually changed
+      if (isAvatarManuallyChanged) return true;
 
       // Deep compare arrays and objects
       if (JSON.stringify(formData.alternate_greetings || []) !== JSON.stringify(initialData.alternate_greetings || [])) return true;
@@ -384,13 +390,18 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
       };
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!formData.name) {
       setError("名字是必填项。");
       return;
     }
-    onSave(getFullCharacter());
+    
+    if (hasContentChanged()) {
+      onSave(getFullCharacter());
+    } else {
+      onCancel();
+    }
   };
 
   const handleExport = async (exportType: 'png' | 'json' | 'package') => {
@@ -455,6 +466,15 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
 
        {/* Header Actions (Fixed relative to content) */}
        <div className="flex justify-end mb-4 shrink-0 relative z-50 gap-2">
+           {hasContentChanged() && (
+               <button 
+                   onClick={() => handleSubmit()} 
+                   className={`p-3 rounded-full backdrop-blur-md border transition-all duration-300 shadow-lg ${theme === 'light' ? 'bg-blue-500 text-white border-blue-400 hover:bg-blue-600' : 'bg-blue-600 border-white/10 hover:bg-blue-500 text-white'}`}
+                   title="保存修改"
+               >
+                   <Save size={20} />
+               </button>
+           )}
            {initialData && onDelete && (
                <button 
                    onClick={() => {
@@ -470,9 +490,17 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
                </button>
            )}
            <button 
-               onClick={handleSubmit} 
+               onClick={() => {
+                   if (hasContentChanged()) {
+                       if (window.confirm("您有未保存的修改，确定要退出吗？")) {
+                           onCancel();
+                       }
+                   } else {
+                       onCancel();
+                   }
+               }} 
                className={`p-3 rounded-full backdrop-blur-md border transition-all duration-300 shadow-lg ${theme === 'light' ? 'bg-white/80 border-slate-300 hover:bg-white text-slate-500' : 'bg-black/20 border-white/10 hover:bg-black/40 text-gray-400'}`}
-               title="保存并返回"
+               title="关闭"
            >
                <X size={20} />
            </button>
