@@ -183,7 +183,19 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
 
   // World Info Handlers
   const handleAddWorldInfo = () => {
-      const newEntry = { keys: [], content: '', name: 'New Entry', insertion_order: 50, case_sensitive: false };
+      const newEntry = { 
+          uid: Math.floor(Math.random() * 9999999) + 1000000,
+          keys: [], 
+          secondary_keys: [],
+          content: '', 
+          name: 'New Entry', 
+          insertion_order: 50, 
+          case_sensitive: false,
+          constant: false,
+          selective: false,
+          enabled: true,
+          position: 0
+      };
       setFormData(prev => {
           const book = prev.character_book || { entries: [] };
           return { ...prev, character_book: { ...book, entries: [...(book.entries || []), newEntry] } };
@@ -1276,7 +1288,7 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
                                     return (
                                         <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
                                             {/* Name & Keys */}
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                                                 <div>
                                                     <label className={`block mb-2 text-xs font-bold uppercase tracking-wider ${theme === 'light' ? 'text-slate-500' : 'text-gray-400'}`}>
                                                         条目名称 (Name)
@@ -1293,7 +1305,7 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
                                                 </div>
                                                 <div>
                                                     <label className={`block mb-2 text-xs font-bold uppercase tracking-wider ${theme === 'light' ? 'text-slate-500' : 'text-gray-400'}`}>
-                                                        触发词 (Keys, 逗号分隔)
+                                                        触发词 (Keys)
                                                     </label>
                                                     <input 
                                                         readOnly={!isEditingWorldInfo}
@@ -1303,6 +1315,20 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
                                                             ${theme === 'light' ? 'bg-white/50 border border-slate-200 text-slate-800 focus:bg-white' : 'bg-black/20 border border-white/10 text-white focus:bg-black/40'}
                                                             ${!isEditingWorldInfo ? 'opacity-80 cursor-default' : ''}`}
                                                         placeholder="例如: 魔法, 魔力, 咒语"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className={`block mb-2 text-xs font-bold uppercase tracking-wider ${theme === 'light' ? 'text-slate-500' : 'text-gray-400'}`}>
+                                                        次要触发词 (Secondary Keys)
+                                                    </label>
+                                                    <input 
+                                                        readOnly={!isEditingWorldInfo}
+                                                        value={(currentEntry.secondary_keys || currentEntry.keysecondary || []).join(', ')}
+                                                        onChange={(e) => setTempWorldInfo({...tempWorldInfo, secondary_keys: e.target.value.split(',').map(k => k.trim()).filter(Boolean), keysecondary: e.target.value.split(',').map(k => k.trim()).filter(Boolean)})}
+                                                        className={`w-full rounded-xl px-4 py-3 text-sm outline-none transition-all font-mono
+                                                            ${theme === 'light' ? 'bg-white/50 border border-slate-200 text-slate-800 focus:bg-white' : 'bg-black/20 border border-white/10 text-white focus:bg-black/40'}
+                                                            ${!isEditingWorldInfo ? 'opacity-80 cursor-default' : ''}`}
+                                                        placeholder="绿灯触发词"
                                                     />
                                                 </div>
                                             </div>
@@ -1326,27 +1352,53 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
 
                                             {/* Advanced Settings */}
                                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                                <div className="flex items-center gap-2">
-                                                    <input 
-                                                        type="checkbox" 
-                                                        id="wi-enabled"
-                                                        disabled={!isEditingWorldInfo}
-                                                        checked={(currentEntry.enabled !== false) && (currentEntry.disable !== true)}
-                                                        onChange={(e) => setTempWorldInfo({...tempWorldInfo, enabled: e.target.checked, disable: !e.target.checked})}
-                                                        className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                                                    />
-                                                    <label htmlFor="wi-enabled" className={`text-sm ${theme === 'light' ? 'text-slate-600' : 'text-gray-300'}`}>启用 (Enabled)</label>
+                                                <div className="flex flex-col gap-3 justify-center pl-2">
+                                                    <div className="flex items-center gap-2">
+                                                        <input 
+                                                            type="checkbox" 
+                                                            id="wi-enabled"
+                                                            disabled={!isEditingWorldInfo}
+                                                            checked={(currentEntry.enabled !== false) && (currentEntry.disable !== true)}
+                                                            onChange={(e) => setTempWorldInfo({...tempWorldInfo, enabled: e.target.checked, disable: !e.target.checked})}
+                                                            className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                        />
+                                                        <label htmlFor="wi-enabled" className={`text-sm font-bold ${theme === 'light' ? 'text-slate-600' : 'text-gray-300'}`}>启用 (Enabled)</label>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <input 
+                                                            type="checkbox" 
+                                                            id="wi-casesensitive"
+                                                            disabled={!isEditingWorldInfo}
+                                                            checked={currentEntry.case_sensitive || false}
+                                                            onChange={(e) => setTempWorldInfo({...tempWorldInfo, case_sensitive: e.target.checked})}
+                                                            className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                        />
+                                                        <label htmlFor="wi-casesensitive" className={`text-sm ${theme === 'light' ? 'text-slate-600' : 'text-gray-300'}`}>大小写敏感</label>
+                                                    </div>
                                                 </div>
-                                                <div className="flex items-center gap-2">
-                                                    <input 
-                                                        type="checkbox" 
-                                                        id="wi-casesensitive"
-                                                        disabled={!isEditingWorldInfo}
-                                                        checked={currentEntry.case_sensitive || false}
-                                                        onChange={(e) => setTempWorldInfo({...tempWorldInfo, case_sensitive: e.target.checked})}
-                                                        className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                                                    />
-                                                    <label htmlFor="wi-casesensitive" className={`text-sm ${theme === 'light' ? 'text-slate-600' : 'text-gray-300'}`}>区分大小写</label>
+                                                <div className="flex flex-col gap-3 justify-center pl-2 border-l border-white/10">
+                                                    <div className="flex items-center gap-2">
+                                                        <input 
+                                                            type="checkbox" 
+                                                            id="wi-constant"
+                                                            disabled={!isEditingWorldInfo}
+                                                            checked={currentEntry.constant || false}
+                                                            onChange={(e) => setTempWorldInfo({...tempWorldInfo, constant: e.target.checked})}
+                                                            className="w-4 h-4 rounded border-gray-300 text-blue-500 focus:ring-blue-500"
+                                                        />
+                                                        <label htmlFor="wi-constant" className={`text-sm font-bold ${theme === 'light' ? 'text-blue-600' : 'text-blue-400'}`}>常驻 (蓝灯)</label>
+                                                    </div>
+                                                    <div className="flex items-center gap-2" title="仅当包含次要触发词时才会被搜索">
+                                                        <input 
+                                                            type="checkbox" 
+                                                            id="wi-selective"
+                                                            disabled={!isEditingWorldInfo}
+                                                            checked={currentEntry.selective || false}
+                                                            onChange={(e) => setTempWorldInfo({...tempWorldInfo, selective: e.target.checked})}
+                                                            className="w-4 h-4 rounded border-gray-300 text-green-500 focus:ring-green-500"
+                                                        />
+                                                        <label htmlFor="wi-selective" className={`text-sm font-bold ${theme === 'light' ? 'text-green-600' : 'text-green-400'}`}>条件 (绿灯)</label>
+                                                    </div>
                                                 </div>
                                                 <div>
                                                     <label className={`block mb-1 text-xs font-bold uppercase ${theme === 'light' ? 'text-slate-500' : 'text-gray-400'}`}>插入顺序 (Order)</label>

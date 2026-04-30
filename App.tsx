@@ -102,24 +102,28 @@ function App() {
   useEffect(() => {
     if (!isLoaded) return; // Don't overwrite with initial empty array
     
-    const saveData = async () => {
-      try {
-        // Strip out blob URLs before saving to avoid storing massive strings or invalid URLs
-        const charsToSave = characters.map(c => {
-            if (c.avatarUrl.startsWith('blob:')) {
-                return { ...c, avatarUrl: '' }; // Will be restored on load
-            }
-            return c;
-        });
-        await set('glass_tavern_characters_v1', charsToSave);
-        // Clean up localStorage to free space
-        localStorage.removeItem('glass_tavern_characters_v1');
-      } catch (e) {
-        console.error("Failed to save characters to IDB", e);
-      }
-    };
-    
-    saveData();
+    const timeoutId = setTimeout(() => {
+      const saveData = async () => {
+        try {
+          // Strip out blob URLs before saving to avoid storing massive strings or invalid URLs
+          const charsToSave = characters.map(c => {
+              if (c.avatarUrl.startsWith('blob:')) {
+                  return { ...c, avatarUrl: '' }; // Will be restored on load
+              }
+              return c;
+          });
+          await set('glass_tavern_characters_v1', charsToSave);
+          // Clean up localStorage to free space
+          localStorage.removeItem('glass_tavern_characters_v1');
+        } catch (e) {
+          console.error("Failed to save characters to IDB", e);
+        }
+      };
+      
+      saveData();
+    }, 500); // Debounce by 500ms to prevent main thread blocking on rapid updates
+
+    return () => clearTimeout(timeoutId);
   }, [characters, isLoaded]);
 
   // Persist folders

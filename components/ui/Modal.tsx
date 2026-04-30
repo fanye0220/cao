@@ -16,14 +16,14 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, theme =
   if (!isOpen) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/50">
       <div 
         className={`
           relative w-full ${maxWidth} rounded-2xl shadow-2xl overflow-hidden
           ${theme === 'light' 
-            ? 'bg-white/90 text-slate-900 border border-white/20' 
-            : 'bg-slate-900/90 text-slate-100 border border-white/10'}
-          backdrop-blur-xl transition-all duration-300 transform scale-100
+            ? 'bg-white text-slate-900 border border-white/20' 
+            : 'bg-slate-900 text-slate-100 border border-white/10'}
+          transition-all duration-300 transform scale-100
         `}
       >
         {/* Header */}

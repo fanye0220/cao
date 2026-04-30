@@ -122,6 +122,14 @@ const CharacterList: React.FC<CharacterListProps> = ({
     try { return JSON.parse(localStorage.getItem('glass_tavern_active_filter') || '{"type":"all"}'); } catch { return { type: 'all' }; }
   });
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   // Resizable Sidebar State
   const [collectionsHeight, setCollectionsHeight] = useState(() => {
@@ -622,8 +630,8 @@ const CharacterList: React.FC<CharacterListProps> = ({
   const filteredCharacters = useMemo(() => {
     let result = characters;
     
-    if (searchQuery.trim()) {
-        const query = searchQuery.toLowerCase();
+    if (debouncedSearchQuery.trim()) {
+        const query = debouncedSearchQuery.toLowerCase();
         result = result.filter(c => 
             c.name.toLowerCase().includes(query) || 
             (c.description && c.description.toLowerCase().includes(query)) ||
@@ -645,13 +653,16 @@ const CharacterList: React.FC<CharacterListProps> = ({
         result = result.filter(c => duplicateIds.has(c.id));
     }
     
-    // Sorting
+    // Sorting (optimize by pre-calculating sort keys if it's updated-desc)
+    if (sortOption === 'updated-desc') {
+        return result.map(char => ({
+            char,
+            time: Math.max(char.updatedAt || 0, char.fileLastModified || 0, char.importDate || 0)
+        })).sort((a, b) => b.time - a.time).map(item => item.char);
+    }
+
     return [...result].sort((a, b) => {
-        if (sortOption === 'updated-desc') {
-            const timeA = Math.max(a.updatedAt || 0, a.fileLastModified || 0, a.importDate || 0);
-            const timeB = Math.max(b.updatedAt || 0, b.fileLastModified || 0, b.importDate || 0);
-            return timeB - timeA;
-        } else if (sortOption === 'date-desc') {
+        if (sortOption === 'date-desc') {
             return (b.importDate || 0) - (a.importDate || 0);
         } else if (sortOption === 'date-asc') {
             return (a.importDate || 0) - (b.importDate || 0);
@@ -662,7 +673,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
         }
         return 0;
     });
-  }, [characters, duplicateIds, sortOption, activeFilter, searchQuery]);
+  }, [characters, duplicateIds, sortOption, activeFilter, debouncedSearchQuery]);
 
   const groupedCharacters = useMemo<[string, Character[]][] | null>(() => {
     if (activeFilter.type !== 'duplicate') return null;

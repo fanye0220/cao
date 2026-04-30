@@ -318,8 +318,9 @@ export const parseCharacterCard = async (file: File): Promise<Character> => {
 
   // Deep copy character_book to avoid mutating originalDataObj
   let characterBookCopy = undefined;
-  if (finalData.character_book) {
-      characterBookCopy = JSON.parse(JSON.stringify(finalData.character_book));
+  const sourceCharacterBook = finalData.character_book || characterData.character_book;
+  if (sourceCharacterBook) {
+      characterBookCopy = JSON.parse(JSON.stringify(sourceCharacterBook));
       if (characterBookCopy.entries && typeof characterBookCopy.entries === 'object' && !Array.isArray(characterBookCopy.entries)) {
           characterBookCopy.entries = Object.values(characterBookCopy.entries);
       } else if (!characterBookCopy.entries || !Array.isArray(characterBookCopy.entries)) {
@@ -328,8 +329,10 @@ export const parseCharacterCard = async (file: File): Promise<Character> => {
       
       // Normalize keys for UI and export compatibility
       if (characterBookCopy.entries) {
-          characterBookCopy.entries = characterBookCopy.entries.map((entry: any) => ({
+          characterBookCopy.entries = characterBookCopy.entries.map((entry: any, index: number) => ({
               ...entry,
+              uid: entry.uid !== undefined ? entry.uid : (entry.id !== undefined ? entry.id : index),
+              id: entry.id !== undefined ? entry.id : (entry.uid !== undefined ? entry.uid : index),
               keys: entry.keys || entry.key || [],
               secondary_keys: entry.secondary_keys || entry.keysecondary || [],
               enabled: entry.enabled !== undefined ? entry.enabled : (entry.disable !== undefined ? !entry.disable : true)
@@ -404,8 +407,9 @@ export const parseCharacterJson = async (file: File): Promise<Character> => {
 
     // Sanitize character_book to prevent crashes and ensure array structure
     let characterBookCopy = undefined;
-    if (finalData.character_book) {
-        characterBookCopy = JSON.parse(JSON.stringify(finalData.character_book));
+    const sourceCharacterBook = finalData.character_book || data.character_book;
+    if (sourceCharacterBook) {
+        characterBookCopy = JSON.parse(JSON.stringify(sourceCharacterBook));
         if (characterBookCopy.entries && typeof characterBookCopy.entries === 'object' && !Array.isArray(characterBookCopy.entries)) {
             // SillyTavern often stores entries as an object map: { "0": {...}, "1": {...} }
             characterBookCopy.entries = Object.values(characterBookCopy.entries);
@@ -413,15 +417,17 @@ export const parseCharacterJson = async (file: File): Promise<Character> => {
             characterBookCopy.entries = [];
         }
 
-        // Normalize keys for UI and export compatibility
-        if (characterBookCopy.entries) {
-            characterBookCopy.entries = characterBookCopy.entries.map((entry: any) => ({
-                ...entry,
-                keys: entry.keys || entry.key || [],
-                secondary_keys: entry.secondary_keys || entry.keysecondary || [],
-                enabled: entry.enabled !== undefined ? entry.enabled : (entry.disable !== undefined ? !entry.disable : true)
-            }));
-        }
+          // Normalize keys for UI and export compatibility
+          if (characterBookCopy.entries) {
+              characterBookCopy.entries = characterBookCopy.entries.map((entry: any, index: number) => ({
+                  ...entry,
+                  uid: entry.uid !== undefined ? entry.uid : (entry.id !== undefined ? entry.id : index),
+                  id: entry.id !== undefined ? entry.id : (entry.uid !== undefined ? entry.uid : index),
+                  keys: entry.keys || entry.key || [],
+                  secondary_keys: entry.secondary_keys || entry.keysecondary || [],
+                  enabled: entry.enabled !== undefined ? entry.enabled : (entry.disable !== undefined ? !entry.disable : true)
+              }));
+          }
     }
 
     // Handle tags format
@@ -528,6 +534,7 @@ export const getTavernExportData = (character: Character) => {
               
               return {
                   ...entry,
+                  uid: entry.uid !== undefined ? entry.uid : (entry.id !== undefined ? entry.id : Math.floor(Math.random() * 99999)),
                   keys: keys,
                   key: keys,
                   secondary_keys: secondaryKeys,
