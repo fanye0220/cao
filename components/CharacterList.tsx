@@ -12,33 +12,57 @@ import { loadImage } from '../services/imageService';
 // Removed invalid module augmentation. We will cast props if needed or ignore the error for now as it's just for directory upload.
 // If needed, we can use a custom input component or just ignore the TS error on the input element locally.
 
+// Global cache for avatar blob URLs to prevent rapid create/revoke cycles causing load failures
+const avatarUrlCache = new Map<string, string>();
+
 // Async lazy loading avatar component
 const AsyncAvatar: React.FC<{ charId: string; initialUrl?: string; alt: string; className?: string }> = ({ charId, initialUrl, alt, className }) => {
-    const [url, setUrl] = useState<string | undefined>(initialUrl?.startsWith('blob:') ? initialUrl : undefined);
+    // We prioritize memory cache, then initialUrl, then undefined
+    const [url, setUrl] = useState<string | undefined>(
+        avatarUrlCache.get(charId) || (initialUrl?.startsWith('blob:') ? initialUrl : undefined)
+    );
 
     useEffect(() => {
-        if (url && url.startsWith('blob:')) return; // Already loaded or pre-set imported image
-        
-        let objectUrl: string | null = null;
+        // If we have an initial blob URL and it differs from cache, update cache
+        if (initialUrl && initialUrl.startsWith('blob:') && avatarUrlCache.get(charId) !== initialUrl) {
+             const oldUrl = avatarUrlCache.get(charId);
+             if (oldUrl && oldUrl.startsWith('blob:')) URL.revokeObjectURL(oldUrl);
+             
+             avatarUrlCache.set(charId, initialUrl);
+             if (url !== initialUrl) setUrl(initialUrl);
+             return;
+        }
+
+        // If it's already loaded and in cache (and state), we're good.
+        if (url && url.startsWith('blob:')) {
+             if (avatarUrlCache.has(charId) && avatarUrlCache.get(charId) !== url) {
+                 // cache changed (e.g. from an edit), update local
+                 setUrl(avatarUrlCache.get(charId));
+             }
+             return;
+        }
+
+        // Otherwise load from IDB
         let mounted = true;
         
         loadImage(charId).then(blob => {
             if (!mounted) return;
             if (blob) {
-                objectUrl = URL.createObjectURL(blob);
+                const objectUrl = URL.createObjectURL(blob);
+                avatarUrlCache.set(charId, objectUrl);
                 setUrl(objectUrl);
             }
         }).catch(err => {
             console.error("Failed to lazy load image for", charId, err);
         });
 
+        // We DO NOT revoke the blob URL here anymore to prevent race conditions 
+        // and browser blob-revocation limits. The browser will clean them up 
+        // when the document unloads. Or we can explicitly clean them only on edit.
         return () => {
             mounted = false;
-            if (objectUrl) {
-                URL.revokeObjectURL(objectUrl);
-            }
         };
-    }, [charId]);
+    }, [charId, initialUrl, url]);
 
     return (
         <img 
