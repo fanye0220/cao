@@ -94,6 +94,7 @@ interface CharacterListProps {
   onCreateFolder?: (name: string) => void;
   onDeleteFolder?: (name: string) => void;
   onRenameFolder?: (oldName: string, newName: string) => void;
+  onReorderFolders?: (draggedFolder: string, targetFolder: string, position: 'before' | 'after') => void;
   isActive?: boolean;
 }
 
@@ -120,6 +121,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
   onCreateFolder,
   onDeleteFolder,
   onRenameFolder,
+  onReorderFolders,
   isActive = true
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -238,6 +240,8 @@ const CharacterList: React.FC<CharacterListProps> = ({
   const [viewCharacter, setViewCharacter] = useState<Character | null>(null);
   
   // Tag & Collection Management
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const [draggingFolder, setDraggingFolder] = useState<string | null>(null);
   const [customTags, setCustomTags] = useState<string[]>([]); // "Card Tags"
   const [showTagFilterModal, setShowTagFilterModal] = useState(false);
   const [tagFilterMode, setTagFilterMode] = useState<'view' | 'edit'>('view');
@@ -480,7 +484,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
 
   // Drag and Drop State
   const [draggedCharId, setDraggedCharId] = useState<string | null>(null);
-  const [dragOverCollection, setDragOverCollection] = useState<string | null>(null);
+  const [dragOverCollection, setDragOverCollection] = useState<{name: string, position: 'before'|'after'|'inside'|'root'} | null>(null);
 
   const handleDragStart = (e: React.DragEvent, charId: string) => {
       if (isSelectionMode && selectedIds.has(charId) && selectedIds.size > 1) {
@@ -493,10 +497,28 @@ const CharacterList: React.FC<CharacterListProps> = ({
       e.dataTransfer.effectAllowed = 'copy';
   };
 
-  const handleDragOver = (e: React.DragEvent, collectionName: string) => {
+  const handleFolderDragStart = (e: React.DragEvent, name: string) => {
+      setDraggingFolder(name);
+      e.dataTransfer.setData('text/folder', name);
+      e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e: React.DragEvent, collectionName: string | null) => {
       e.preventDefault();
-      setDragOverCollection(collectionName);
-      e.dataTransfer.dropEffect = 'copy';
+      if (draggingFolder && collectionName) {
+          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+          const y = e.clientY - rect.top;
+          if (y < rect.height * 0.25) {
+              setDragOverCollection({ name: collectionName, position: 'before' });
+          } else if (y > rect.height * 0.75) {
+              setDragOverCollection({ name: collectionName, position: 'after' });
+          } else {
+              setDragOverCollection({ name: collectionName, position: 'inside' });
+          }
+      } else {
+          setDragOverCollection(collectionName ? { name: collectionName, position: 'inside' } : { name: '', position: 'root' });
+      }
+      e.dataTransfer.dropEffect = draggingFolder ? 'move' : 'copy';
   };
 
   const handleDragLeave = (e: React.DragEvent) => {
@@ -504,18 +526,37 @@ const CharacterList: React.FC<CharacterListProps> = ({
       setDragOverCollection(null);
   };
 
-  const handleDrop = (e: React.DragEvent, collectionName: string) => {
+  const handleDrop = (e: React.DragEvent, collectionName: string | null) => {
       e.preventDefault();
+      const dropPosition = dragOverCollection?.position || 'inside';
       setDragOverCollection(null);
+      setDraggingFolder(null);
+
+      const folderData = e.dataTransfer.getData('text/folder');
+      if (folderData) {
+          const isReorder = dropPosition === 'before' || dropPosition === 'after';
+          if (!isReorder && (dropPosition === 'inside' || dropPosition === 'root')) {
+              const draggedBaseName = folderData.split('/').pop()!;
+              const newName = collectionName ? `${collectionName}/${draggedBaseName}` : draggedBaseName;
+              if (folderData !== collectionName && (!collectionName || !collectionName.startsWith(folderData + '/')) && newName !== folderData) {
+                  if (onRenameFolder) onRenameFolder(folderData, newName);
+              }
+          } else if (onReorderFolders && collectionName && folderData !== collectionName) {
+              onReorderFolders(folderData, collectionName, dropPosition === 'after' ? 'after' : 'before');
+          }
+          return;
+      }
+
       const dataStr = e.dataTransfer.getData('text/plain');
       
       if (dataStr) {
           try {
               const data = JSON.parse(dataStr);
+              const targetFolder = collectionName || undefined;
               if (data.type === 'multi' && Array.isArray(data.ids)) {
                   const charsToUpdate = characters
-                      .filter(c => data.ids.includes(c.id) && c.folder !== collectionName)
-                      .map(c => ({ ...c, folder: collectionName }));
+                      .filter(c => data.ids.includes(c.id) && c.folder !== targetFolder)
+                      .map(c => ({ ...c, folder: targetFolder }));
                   if (charsToUpdate.length > 0) {
                       if (onUpdateBatch) {
                           onUpdateBatch(charsToUpdate);
@@ -525,15 +566,16 @@ const CharacterList: React.FC<CharacterListProps> = ({
                   }
               } else if (data.type === 'single' && data.id) {
                   const char = characters.find(c => c.id === data.id);
-                  if (char && char.folder !== collectionName) {
-                      onUpdate?.({ ...char, folder: collectionName });
+                  if (char && char.folder !== targetFolder) {
+                      onUpdate?.({ ...char, folder: targetFolder });
                   }
               }
           } catch (err) {
               // Fallback to legacy string charId
+              const targetFolder = collectionName || undefined;
               const char = characters.find(c => c.id === dataStr);
-              if (char && char.folder !== collectionName) {
-                  onUpdate?.({ ...char, folder: collectionName });
+              if (char && char.folder !== targetFolder) {
+                  onUpdate?.({ ...char, folder: targetFolder });
               }
           }
       }
@@ -871,10 +913,14 @@ const CharacterList: React.FC<CharacterListProps> = ({
         if (file.webkitRelativePath) {
             const parts = file.webkitRelativePath.split('/');
             if (parts.length >= 2) {
-                const folderName = parts[parts.length - 2];
-                if (folderName) {
-                    if (onCreateFolder) onCreateFolder(folderName);
-                    char.folder = folderName;
+                const folderPath = parts.slice(0, parts.length - 1).join('/');
+                if (folderPath) {
+                    let currentPath = '';
+                    for (const part of folderPath.split('/')) {
+                        currentPath = currentPath ? `${currentPath}/${part}` : part;
+                        if (onCreateFolder) onCreateFolder(currentPath);
+                    }
+                    char.folder = folderPath;
                 }
             }
         }
@@ -1255,7 +1301,12 @@ const CharacterList: React.FC<CharacterListProps> = ({
               <div className={`h-px my-3 mx-2 ${theme === 'light' ? 'bg-slate-200/60' : 'bg-white/5'}`}></div>
 
               {/* Collections Header */}
-              <div className={`w-full px-2 py-2 flex items-center justify-between`}>
+              <div 
+                  className={`w-full px-2 py-2 flex items-center justify-between transition-colors ${dragOverCollection?.position === 'root' ? (theme === 'light' ? 'bg-blue-100 ring-2 ring-blue-400 rounded-xl' : 'bg-blue-500/30 ring-2 ring-blue-500 rounded-xl') : ''}`}
+                  onDragOver={(e) => handleDragOver(e, null)}
+                  onDragLeave={handleDragLeave}
+                  onDrop={(e) => handleDrop(e, null)}
+              >
                   <button 
                       onClick={() => setIsCollectionsExpanded(!isCollectionsExpanded)}
                       className={`flex-1 text-left font-bold text-xs uppercase tracking-wider flex items-center gap-2 ${theme === 'light' ? 'text-slate-400 hover:text-slate-600' : 'text-gray-500 hover:text-gray-300'}`}
@@ -1298,9 +1349,26 @@ const CharacterList: React.FC<CharacterListProps> = ({
                           />
                       </div>
                   )}
-                  {folders.map(name => (
-                      <div key={name} className="relative group">
-                          {editingCollection === name ? (
+                  {(() => {
+                      const displayed = folders.filter(f => {
+                          const parts = f.split('/');
+                          if (parts.length === 1) return true;
+                          let currentPath = '';
+                          for (let i = 0; i < parts.length - 1; i++) {
+                              currentPath = currentPath ? `${currentPath}/${parts[i]}` : parts[i];
+                              if (!expandedFolders.has(currentPath)) return false;
+                          }
+                          return true;
+                      });
+                      
+                      return displayed.map(name => {
+                          const parts = name.split('/');
+                          const displayName = <span className="truncate flex-1" title={name}>{parts[parts.length - 1]}</span>;
+                          const hasChildren = folders.some(f => f.startsWith(`${name}/`) && f !== name);
+                          
+                          return (
+                              <div key={name} className="relative group">
+                                  {editingCollection === name ? (
                               <input
                                   autoFocus
                                   type="text"
@@ -1315,19 +1383,47 @@ const CharacterList: React.FC<CharacterListProps> = ({
                               />
                           ) : (
                               <button
+                                  draggable
+                                  onDragStart={(e) => handleFolderDragStart(e, name)}
+                                  onDragEnd={() => setDraggingFolder(null)}
                                   onClick={() => setActiveFilter({ type: 'collection', value: name })}
                                   onDoubleClick={(e) => handleStartRenameCollection(name, e)}
                                   onDragOver={(e) => handleDragOver(e, name)}
                                   onDragLeave={handleDragLeave}
                                   onDrop={(e) => handleDrop(e, name)}
-                                  className={`w-full text-left px-4 py-2.5 rounded-xl text-sm font-medium flex items-center gap-2 transition-all group relative 
+                                  className={`w-full text-left px-2 py-2.5 rounded-xl text-sm font-medium flex items-center gap-1 transition-all group relative 
                                     ${activeFilter.type === 'collection' && activeFilter.value === name ? (theme === 'light' ? 'bg-slate-200 text-slate-900' : 'bg-white/20 text-white') : (theme === 'light' ? 'hover:bg-white/50 text-slate-500' : 'hover:bg-white/5 text-gray-400')}
-                                    ${dragOverCollection === name ? (theme === 'light' ? 'bg-blue-100 ring-2 ring-blue-400' : 'bg-blue-500/30 ring-2 ring-blue-500') : ''}
+                                    ${dragOverCollection === name && !draggingFolder ? (theme === 'light' ? 'bg-blue-100 ring-2 ring-blue-400' : 'bg-blue-500/30 ring-2 ring-blue-500') : ''}
+                                    ${dragOverCollection === name && draggingFolder && draggingFolder !== name ? (theme === 'light' ? 'bg-slate-100' : 'bg-white/5') : ''}
+                                    ${draggingFolder === name ? 'opacity-50' : ''}
                                   `}
+                                  style={{ borderTop: dragOverCollection === name && draggingFolder && draggingFolder !== name ? '2px solid #3b82f6' : '2px solid transparent', borderBottom: '2px solid transparent' }}
                               >
-                                  <Folder size={14} className="opacity-70" />
-                                  <span className="truncate flex-1">{name}</span>
-                                  <span className="text-[10px] opacity-50 group-hover:opacity-0 transition-opacity">{characters.filter(c => c.folder === name).length}</span>
+                                  <div 
+                                       className={`p-1 -ml-1 rounded cursor-pointer shrink-0 transition-colors ${theme === 'light' ? 'hover:bg-slate-300' : 'hover:bg-gray-600'}`}
+                                       onClick={(e) => {
+                                           if (!hasChildren) return;
+                                           e.stopPropagation();
+                                           setExpandedFolders(prev => {
+                                               const next = new Set(prev);
+                                               if (next.has(name)) next.delete(name);
+                                               else next.add(name);
+                                               return next;
+                                           });
+                                       }}
+                                   >
+                                      {hasChildren ? (
+                                        expandedFolders.has(name) ? <ChevronDown size={14} className="opacity-70" /> : <ChevronRight size={14} className="opacity-70" />
+                                      ) : (
+                                        <Folder size={14} className="opacity-70" />
+                                      )}
+                                  </div>
+                                  <div className="flex-1 overflow-hidden ml-1 flex items-center">
+                                      {displayName}
+                                  </div>
+                                  <span className="text-[10px] opacity-50 shadow-sm transition-opacity">
+                                      {characters.filter(c => c.folder === name || (c.folder && c.folder.startsWith(name + '/'))).length}
+                                  </span>
                                   
                                   {/* Actions */}
                                   <div className={`absolute right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all`}>
@@ -1349,7 +1445,9 @@ const CharacterList: React.FC<CharacterListProps> = ({
                               </button>
                           )}
                       </div>
-                  ))}
+                  );
+              });
+          })()}
                   {folders.length === 0 && !isAddingCollection && (
                       <div className={`text-center py-4 text-xs ${theme === 'light' ? 'text-slate-400' : 'text-gray-600'}`}>
                           暂无文件夹
@@ -1392,10 +1490,11 @@ const CharacterList: React.FC<CharacterListProps> = ({
                    {activeFilter.type === 'duplicate' && '重复角色'}
                    {(activeFilter as any).recommendResults && 'AI 智能推荐结果'}
                </h1>
+               {/* Filter counts bug fix in header */}
                <p className={`text-xs ${subTextColor}`}>
                    {activeFilter.type === 'all' && `共 ${characters.length} 张卡片`}
                    {activeFilter.type === 'tag' && `标签 "${activeFilter.value}" 下共 ${characters.filter(c => (Array.isArray(c.tags) ? c.tags : []).includes(activeFilter.value || '')).length} 张卡片`}
-                   {activeFilter.type === 'collection' && `文件夹 "${activeFilter.value}" 下共 ${characters.filter(c => (Array.isArray(c.tags) ? c.tags : []).includes(activeFilter.value || '')).length} 张卡片`}
+                   {activeFilter.type === 'collection' && `文件夹 "${activeFilter.value}" 下共 ${characters.filter(c => c.folder === activeFilter.value || (c.folder && c.folder.startsWith(activeFilter.value + '/'))).length} 张卡片`}
                    {activeFilter.type === 'duplicate' && `共 ${duplicateIds.size} 张重复卡片`}
                    {(activeFilter as any).recommendResults && `根据关键词找到 ${(activeFilter as any).recommendResults?.length} 张卡片`}
                </p>

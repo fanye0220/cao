@@ -455,12 +455,12 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
     <div className="h-full w-full max-w-4xl mx-auto p-4 md:p-6 animate-fade-in flex flex-col relative">
        
        {/* Dynamic Background */}
-       <div className="fixed inset-0 z-0 pointer-events-none">
+       <div className="fixed inset-0 z-[0] pointer-events-none overflow-hidden">
            <div 
-               className="absolute inset-0 bg-cover bg-center transition-all duration-700 opacity-80 scale-110"
+               className="absolute inset-[-10%] bg-cover bg-center transition-opacity duration-700 opacity-80 blur-[40px] transform-gpu"
                style={{ backgroundImage: `url(${formData.avatarUrl})` }}
            />
-           <div className={`absolute inset-0 backdrop-blur-[40px] ${theme === 'light' ? 'bg-white/30' : 'bg-[#0f172a]/30'}`} />
+           <div className={`absolute inset-0 ${theme === 'light' ? 'bg-white/40' : 'bg-[#0f172a]/40'}`} />
            <div className={`absolute inset-0 ${theme === 'light' ? 'bg-gradient-to-b from-white/20 to-white/60' : 'bg-gradient-to-b from-black/10 to-[#0f172a]/60'}`} />
        </div>
 

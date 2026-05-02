@@ -203,17 +203,48 @@ function App() {
   };
 
   const handleDeleteFolder = (name: string) => {
-    if (window.confirm(`确定要删除文件夹 "${name}" 吗？文件夹内的角色不会被删除。`)) {
-      setFolders(prev => prev.filter(f => f !== name));
+    if (window.confirm(`确定要删除文件夹 "${name}" 及其子文件夹吗？文件夹内的角色不会被删除。`)) {
+      setFolders(prev => prev.filter(f => f !== name && !f.startsWith(name + '/')));
       // Remove folder assignment from characters
-      setCharacters(prev => prev.map(c => c.folder === name ? { ...c, folder: undefined } : c));
+      setCharacters(prev => prev.map(c => (c.folder === name || c.folder?.startsWith(name + '/')) ? { ...c, folder: undefined } : c));
     }
   };
 
   const handleRenameFolder = (oldName: string, newName: string) => {
     if (folders.includes(newName)) return;
-    setFolders(prev => prev.map(f => f === oldName ? newName : f));
-    setCharacters(prev => prev.map(c => c.folder === oldName ? { ...c, folder: newName } : c));
+    setFolders(prev => prev.map(f => {
+      if (f === oldName) return newName;
+      if (f.startsWith(oldName + '/')) return newName + f.slice(oldName.length);
+      return f;
+    }));
+    setCharacters(prev => prev.map(c => {
+      if (c.folder === oldName) return { ...c, folder: newName };
+      if (c.folder?.startsWith(oldName + '/')) return { ...c, folder: newName + c.folder.slice(oldName.length) };
+      return c;
+    }));
+  };
+
+  const handleReorderFolders = (draggedFolder: string, targetFolder: string, position: 'before' | 'after' = 'before') => {
+    setFolders(prev => {
+      if (draggedFolder === targetFolder) return prev;
+      
+      const draggedGroup = prev.filter(f => f === draggedFolder || f.startsWith(draggedFolder + '/'));
+      if (targetFolder.startsWith(draggedFolder + '/')) return prev;
+
+      const remaining = prev.filter(f => !draggedGroup.includes(f));
+      
+      const targetBaseIndex = remaining.indexOf(targetFolder);
+      if (targetBaseIndex === -1) return prev;
+      
+      const targetGroup = remaining.filter(f => f === targetFolder || f.startsWith(targetFolder + '/'));
+      const insertIndex = position === 'before' ? targetBaseIndex : targetBaseIndex + targetGroup.length;
+      
+      return [
+        ...remaining.slice(0, insertIndex),
+        ...draggedGroup,
+        ...remaining.slice(insertIndex)
+      ];
+    });
   };
 
   const selectedCharacter = characters.find(c => c.id === selectedCharacterId);
@@ -294,6 +325,7 @@ function App() {
               onCreateFolder={handleCreateFolder}
               onDeleteFolder={handleDeleteFolder}
               onRenameFolder={handleRenameFolder}
+              onReorderFolders={handleReorderFolders}
               theme={theme}
               isActive={view === 'list'}
             />
