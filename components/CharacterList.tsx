@@ -868,6 +868,17 @@ const CharacterList: React.FC<CharacterListProps> = ({
             char = await parseCharacterJson(file);
         }
 
+        if (file.webkitRelativePath) {
+            const parts = file.webkitRelativePath.split('/');
+            if (parts.length >= 2) {
+                const folderName = parts[parts.length - 2];
+                if (folderName) {
+                    if (onCreateFolder) onCreateFolder(folderName);
+                    char.folder = folderName;
+                }
+            }
+        }
+
         const isDuplicateInApp = characters.some(c => c.name === char.name);
         const isDuplicateInBatch = seenNamesInBatch.has(char.name);
         

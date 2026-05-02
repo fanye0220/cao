@@ -194,9 +194,12 @@ function App() {
   };
 
   const handleCreateFolder = (name: string) => {
-    if (!folders.includes(name)) {
-      setFolders(prev => [...prev, name]);
-    }
+    setFolders(prev => {
+      if (!prev.includes(name)) {
+        return [...prev, name];
+      }
+      return prev;
+    });
   };
 
   const handleDeleteFolder = (name: string) => {
