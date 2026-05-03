@@ -220,6 +220,8 @@ const CharacterList: React.FC<CharacterListProps> = ({
   // States
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isFolderSelectionMode, setIsFolderSelectionMode] = useState(false);
+  const [selectedFolders, setSelectedFolders] = useState<Set<string>>(new Set());
   const [lastSelectedId, setLastSelectedId] = useState<string | null>(null);
   const [exportMenuCharId, setExportMenuCharId] = useState<string | null>(null);
   const [sortOption, setSortOption] = useState<'updated-desc' | 'date-desc' | 'date-asc' | 'name-asc' | 'name-desc'>(() => {
@@ -1322,14 +1324,61 @@ const CharacterList: React.FC<CharacterListProps> = ({
                       <span>文件夹 ({folders.length})</span>
                       {isCollectionsExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                   </button>
-                  <button 
-                      onClick={() => setIsAddingCollection(!isAddingCollection)}
-                      className={`p-1 rounded-md transition-colors ${theme === 'light' ? 'hover:bg-slate-200 text-slate-400 hover:text-slate-600' : 'hover:bg-white/10 text-gray-500 hover:text-gray-300'}`}
-                      title="新建文件夹"
-                  >
-                      <FolderPlus size={14} />
-                  </button>
+                  <div className="flex items-center">
+                      <button 
+                          onClick={() => {
+                              setIsFolderSelectionMode(!isFolderSelectionMode);
+                              if (!isFolderSelectionMode) setIsCollectionsExpanded(true);
+                              setSelectedFolders(new Set());
+                          }}
+                          className={`p-1 mr-1 rounded-md transition-colors ${theme === 'light' ? 'hover:bg-slate-200 text-slate-400 hover:text-slate-600' : 'hover:bg-white/10 text-gray-500 hover:text-gray-300'} ${isFolderSelectionMode ? 'text-blue-500' : ''}`}
+                          title={isFolderSelectionMode ? "取消多选" : "批量选择文件夹"}
+                      >
+                          <CheckSquare size={14} />
+                      </button>
+                      <button 
+                          onClick={() => setIsAddingCollection(!isAddingCollection)}
+                          className={`p-1 rounded-md transition-colors ${theme === 'light' ? 'hover:bg-slate-200 text-slate-400 hover:text-slate-600' : 'hover:bg-white/10 text-gray-500 hover:text-gray-300'}`}
+                          title="新建文件夹"
+                      >
+                          <FolderPlus size={14} />
+                      </button>
+                  </div>
               </div>
+
+              {isFolderSelectionMode && (
+                  <div className={`mb-2 mx-2 p-2 rounded-xl flex items-center justify-between ${
+                      theme === 'light' 
+                          ? 'bg-blue-50 border-blue-100 text-blue-900 shadow-sm' 
+                          : 'bg-blue-900/20 border-blue-500/20 text-blue-100'
+                  } border`}>
+                      <div className="flex items-center gap-2">
+                         <button 
+                             onClick={() => {
+                                 if (selectedFolders.size === folders.length) setSelectedFolders(new Set());
+                                 else setSelectedFolders(new Set(folders));
+                             }}
+                             className="text-xs font-bold shrink-0 hover:underline"
+                         >
+                             全选
+                         </button>
+                         <span className="text-xs opacity-70">已选 {selectedFolders.size}</span>
+                      </div>
+                      <button
+                          disabled={selectedFolders.size === 0}
+                          onClick={() => {
+                              if (window.confirm(`确定要删除这 ${selectedFolders.size} 个文件夹吗？其内的角色将被移出。`)) {
+                                  selectedFolders.forEach(name => onDeleteFolder?.(name));
+                                  setSelectedFolders(new Set());
+                                  setIsFolderSelectionMode(false);
+                              }
+                          }}
+                          className="flex items-center gap-1 text-xs text-red-500 disabled:opacity-50 hover:bg-red-500/10 p-1.5 rounded-lg transition-colors"
+                      >
+                          <Trash2 size={14} /> 删除
+                      </button>
+                  </div>
+              )}
 
               {/* Collections List */}
               <div 
@@ -1393,7 +1442,18 @@ const CharacterList: React.FC<CharacterListProps> = ({
                                   draggable
                                   onDragStart={(e) => handleFolderDragStart(e, name)}
                                   onDragEnd={() => setDraggingFolder(null)}
-                                  onClick={() => setActiveFilter({ type: 'collection', value: name })}
+                                  onClick={() => {
+                                      if (isFolderSelectionMode) {
+                                          setSelectedFolders(prev => {
+                                              const next = new Set(prev);
+                                              if (next.has(name)) next.delete(name);
+                                              else next.add(name);
+                                              return next;
+                                          });
+                                      } else {
+                                          setActiveFilter({ type: 'collection', value: name });
+                                      }
+                                  }}
                                   onDoubleClick={(e) => handleStartRenameCollection(name, e)}
                                   onDragOver={(e) => handleDragOver(e, name)}
                                   onDragLeave={handleDragLeave}
@@ -1403,9 +1463,15 @@ const CharacterList: React.FC<CharacterListProps> = ({
                                     ${dragOverCollection === name && !draggingFolder ? (theme === 'light' ? 'bg-blue-100 ring-2 ring-blue-400' : 'bg-blue-500/30 ring-2 ring-blue-500') : ''}
                                     ${dragOverCollection === name && draggingFolder && draggingFolder !== name ? (theme === 'light' ? 'bg-slate-100' : 'bg-white/5') : ''}
                                     ${draggingFolder === name ? 'opacity-50' : ''}
+                                    ${isFolderSelectionMode && selectedFolders.has(name) ? (theme === 'light' ? 'ring-2 ring-blue-500 bg-blue-50/50' : 'ring-2 ring-blue-400 bg-blue-900/30') : ''}
                                   `}
                                   style={{ borderTop: dragOverCollection === name && draggingFolder && draggingFolder !== name ? '2px solid #3b82f6' : '2px solid transparent', borderBottom: '2px solid transparent' }}
                               >
+                                  {isFolderSelectionMode && (
+                                     <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ml-1 mr-1 ${selectedFolders.has(name) ? 'bg-blue-500 border-blue-500 text-white' : 'border-current opacity-50'}`}>
+                                        {selectedFolders.has(name) && <Check size={12} strokeWidth={3} />}
+                                     </div>
+                                  )}
                                   <div 
                                        className={`p-1 -ml-1 rounded cursor-pointer shrink-0 transition-colors ${theme === 'light' ? 'hover:bg-slate-300' : 'hover:bg-gray-600'}`}
                                        onClick={(e) => {
