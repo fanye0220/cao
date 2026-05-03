@@ -92,6 +92,7 @@ interface CharacterListProps {
   theme: Theme;
   folders?: string[]; // Optional for now as it seems unused in this version
   onCreateFolder?: (name: string) => void;
+  onCreateFolders?: (names: string[]) => void;
   onDeleteFolder?: (name: string) => void;
   onRenameFolder?: (oldName: string, newName: string) => void;
   onReorderFolders?: (draggedFolder: string, targetFolder: string, position: 'before' | 'after') => void;
@@ -119,6 +120,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
   theme,
   folders = [],
   onCreateFolder,
+  onCreateFolders,
   onDeleteFolder,
   onRenameFolder,
   onReorderFolders,
@@ -886,6 +888,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
     const fileArray = Array.from(files) as File[];
     const validChars: Character[] = [];
     const seenNamesInBatch = new Set<string>();
+    const newFoldersToCreate = new Set<string>();
 
     for (let i = 0; i < fileArray.length; i++) {
       const file = fileArray[i];
@@ -918,7 +921,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
                     let currentPath = '';
                     for (const part of folderPath.split('/')) {
                         currentPath = currentPath ? `${currentPath}/${part}` : part;
-                        if (onCreateFolder) onCreateFolder(currentPath);
+                        newFoldersToCreate.add(currentPath);
                     }
                     char.folder = folderPath;
                 }
@@ -950,6 +953,10 @@ const CharacterList: React.FC<CharacterListProps> = ({
             otherFailedFiles.push(file.name);
         }
       }
+    }
+
+    if (newFoldersToCreate.size > 0 && onCreateFolders) {
+        onCreateFolders(Array.from(newFoldersToCreate));
     }
 
     if (validChars.length > 0) {

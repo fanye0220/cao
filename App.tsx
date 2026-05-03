@@ -202,6 +202,16 @@ function App() {
     });
   };
 
+  const handleCreateFolders = (names: string[]) => {
+    if (names.length === 0) return;
+    setFolders(prev => {
+      const prevSet = new Set(prev);
+      const newFolders = names.filter(n => !prevSet.has(n));
+      if (newFolders.length === 0) return prev;
+      return [...prev, ...newFolders];
+    });
+  };
+
   const handleDeleteFolder = (name: string) => {
     if (window.confirm(`确定要删除文件夹 "${name}" 及其子文件夹吗？文件夹内的角色不会被删除。`)) {
       setFolders(prev => prev.filter(f => f !== name && !f.startsWith(name + '/')));
@@ -323,6 +333,7 @@ function App() {
               onUpdateBatch={handleUpdateBatch}
               folders={folders}
               onCreateFolder={handleCreateFolder}
+              onCreateFolders={handleCreateFolders}
               onDeleteFolder={handleDeleteFolder}
               onRenameFolder={handleRenameFolder}
               onReorderFolders={handleReorderFolders}
