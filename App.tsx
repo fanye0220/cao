@@ -212,12 +212,17 @@ function App() {
     });
   };
 
-  const handleDeleteFolder = (name: string) => {
-    if (window.confirm(`确定要删除文件夹 "${name}" 及其子文件夹吗？文件夹内的角色不会被删除。`)) {
+  const handleDeleteFolder = (name: string, skipConfirm = false) => {
+    if (skipConfirm || window.confirm(`确定要删除文件夹 "${name}" 及其子文件夹吗？文件夹内的角色不会被删除。`)) {
       setFolders(prev => prev.filter(f => f !== name && !f.startsWith(name + '/')));
       // Remove folder assignment from characters
       setCharacters(prev => prev.map(c => (c.folder === name || c.folder?.startsWith(name + '/')) ? { ...c, folder: undefined } : c));
     }
+  };
+
+  const handleDeleteFolders = (names: string[]) => {
+    setFolders(prev => prev.filter(f => !names.some(name => f === name || f.startsWith(name + '/'))));
+    setCharacters(prev => prev.map(c => names.some(name => c.folder === name || c.folder?.startsWith(name + '/')) ? { ...c, folder: undefined } : c));
   };
 
   const handleRenameFolder = (oldName: string, newName: string) => {
@@ -335,6 +340,7 @@ function App() {
               onCreateFolder={handleCreateFolder}
               onCreateFolders={handleCreateFolders}
               onDeleteFolder={handleDeleteFolder}
+              onDeleteFolders={handleDeleteFolders}
               onRenameFolder={handleRenameFolder}
               onReorderFolders={handleReorderFolders}
               theme={theme}

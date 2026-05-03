@@ -94,6 +94,7 @@ interface CharacterListProps {
   onCreateFolder?: (name: string) => void;
   onCreateFolders?: (names: string[]) => void;
   onDeleteFolder?: (name: string) => void;
+  onDeleteFolders?: (names: string[]) => void;
   onRenameFolder?: (oldName: string, newName: string) => void;
   onReorderFolders?: (draggedFolder: string, targetFolder: string, position: 'before' | 'after') => void;
   isActive?: boolean;
@@ -122,6 +123,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
   onCreateFolder,
   onCreateFolders,
   onDeleteFolder,
+  onDeleteFolders,
   onRenameFolder,
   onReorderFolders,
   isActive = true
@@ -1368,7 +1370,12 @@ const CharacterList: React.FC<CharacterListProps> = ({
                           disabled={selectedFolders.size === 0}
                           onClick={() => {
                               if (window.confirm(`确定要删除这 ${selectedFolders.size} 个文件夹吗？其内的角色将被移出。`)) {
-                                  selectedFolders.forEach(name => onDeleteFolder?.(name));
+                                  if (onDeleteFolders) {
+                                      onDeleteFolders(Array.from(selectedFolders));
+                                  } else {
+                                      // Fallback but shouldn't be used
+                                      selectedFolders.forEach(name => onDeleteFolder?.(name));
+                                  }
                                   setSelectedFolders(new Set());
                                   setIsFolderSelectionMode(false);
                               }
