@@ -822,15 +822,23 @@ const CharacterList: React.FC<CharacterListProps> = ({
             </div>
 
             <div className="mb-2">
-                <div className="flex items-center gap-2 mb-1">
-                    <h3 className={`text-lg font-bold truncate leading-tight ${theme === 'light' ? 'text-gray-900' : 'text-gray-100'}`} title={char.name}>
-                        {char.name}
-                    </h3>
-                    <div className="flex items-center gap-1 flex-shrink-0">
-                        {char.tags && char.tags.length > 0 && <Tag size={12} className="text-blue-500" title={`包含 ${char.tags.length} 个标签`} />}
-                        {hasQr && <span className="text-[9px] font-extrabold text-green-500 border border-green-500/50 rounded-[3px] px-1 py-[1px] leading-none" title="包含二维码配置">QR</span>}
-                        {hasWorldInfo && <Book size={14} className="text-yellow-500" title="包含世界书" />}
+                <div className="flex flex-col gap-1 mb-1">
+                    <div className="flex items-center gap-2">
+                        <h3 className={`text-lg font-bold truncate leading-tight ${theme === 'light' ? 'text-gray-900' : 'text-gray-100'}`} title={char.name}>
+                            {char.name}
+                        </h3>
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                            {char.tags && char.tags.length > 0 && <Tag size={12} className="text-blue-500" title={`包含 ${char.tags.length} 个标签`} />}
+                            {hasQr && <span className="text-[9px] font-extrabold text-green-500 border border-green-500/50 rounded-[3px] px-1 py-[1px] leading-none" title="包含二维码配置">QR</span>}
+                            {hasWorldInfo && <Book size={14} className="text-yellow-500" title="包含世界书" />}
+                        </div>
                     </div>
+                    {char.folder && activeFilter.type !== 'collection' && (
+                        <div className={`flex items-center gap-1.5 text-[11px] font-medium opacity-80 mt-0.5 ${theme === 'light' ? 'text-slate-600' : 'text-slate-300'}`}>
+                            <Folder size={12} className="shrink-0 text-yellow-500 fill-yellow-500/20" />
+                            <span className="truncate">{char.folder}</span>
+                        </div>
+                    )}
                 </div>
                 
                 {/* Character Tags Row */}
@@ -875,7 +883,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
     );
   };
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>, isFolderImport: boolean = false) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
@@ -917,7 +925,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
             char = await parseCharacterJson(file);
         }
 
-        if (file.webkitRelativePath) {
+        if (isFolderImport && file.webkitRelativePath) {
             const parts = file.webkitRelativePath.split('/');
             if (parts.length >= 2) {
                 const folderPath = parts.slice(0, parts.length - 1).join('/');
@@ -1498,25 +1506,25 @@ const CharacterList: React.FC<CharacterListProps> = ({
                                         <Folder size={14} className="opacity-70" />
                                       )}
                                   </div>
-                                  <div className="flex-1 overflow-hidden ml-1 flex items-center">
+                                  <div className="flex-1 overflow-hidden ml-1 truncate text-left">
                                       {displayName}
                                   </div>
-                                  <span className="text-[10px] opacity-50 shadow-sm transition-opacity">
+                                  <span className="text-[10px] opacity-50 shadow-sm transition-opacity group-hover:hidden whitespace-nowrap">
                                       {characters.filter(c => c.folder === name || (c.folder && c.folder.startsWith(name + '/'))).length}
                                   </span>
                                   
                                   {/* Actions */}
-                                  <div className={`absolute right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all`}>
+                                  <div className={`hidden group-hover:flex items-center gap-1 shrink-0 ml-1`}>
                                       <div 
                                           onClick={(e) => handleStartRenameCollection(name, e)}
-                                          className={`p-1.5 rounded-lg ${theme === 'light' ? 'hover:bg-blue-100 text-blue-400' : 'hover:bg-blue-500/20 text-blue-400'}`}
+                                          className={`p-1.5 rounded-lg ${theme === 'light' ? 'hover:bg-blue-100 text-slate-400 hover:text-blue-500' : 'hover:bg-blue-500/30 text-gray-400 hover:text-blue-400'}`}
                                           title="重命名"
                                       >
                                           <Pencil size={12} />
                                       </div>
                                       <div 
                                           onClick={(e) => handleDeleteCollection(name, e)}
-                                          className={`p-1.5 rounded-lg ${theme === 'light' ? 'hover:bg-red-100 text-red-400' : 'hover:bg-red-500/20 text-red-400'}`}
+                                          className={`p-1.5 rounded-lg ${theme === 'light' ? 'hover:bg-red-100 text-slate-400 hover:text-red-500' : 'hover:bg-red-500/30 text-gray-400 hover:text-red-400'}`}
                                           title="删除"
                                       >
                                           <Trash2 size={12} />
@@ -1755,9 +1763,9 @@ const CharacterList: React.FC<CharacterListProps> = ({
                 {isSelectionMode ? '取消' : '多选'}
             </button>
 
-            <input type="file" accept="image/png,application/json" multiple className="hidden" ref={fileInputRef} onChange={handleFileChange} />
+            <input type="file" accept="image/png,application/json" multiple className="hidden" ref={fileInputRef} onChange={(e) => handleFileChange(e, false)} />
             {/* @ts-ignore */}
-            <input type="file" webkitdirectory="" directory="" multiple className="hidden" ref={folderInputRef} onChange={handleFileChange} />
+            <input type="file" webkitdirectory="" directory="" multiple className="hidden" ref={folderInputRef} onChange={(e) => handleFileChange(e, true)} />
 
             <div className="flex gap-1">
                 <button 
