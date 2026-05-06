@@ -898,73 +898,84 @@ const CharacterList: React.FC<CharacterListProps> = ({
     const otherFailedFiles: string[] = [];
     const qrFiles: string[] = [];
     const fileArray = Array.from(files) as File[];
-    const validChars: Character[] = [];
+    let validChars: Character[] = [];
     const seenNamesInBatch = new Set<string>();
+    const existingNames = new Set(characters.map(c => c.name));
     const newFoldersToCreate = new Set<string>();
 
     for (let i = 0; i < fileArray.length; i++) {
-      const file = fileArray[i];
+        const file = fileArray[i];
 
-      // Yield to main thread every few items to keep UI responsive
-      if (i % 5 === 0) {
-          setImportingCount(fileArray.length - i);
-          await new Promise(resolve => setTimeout(resolve, 0));
-      }
-
-      const isPng = file.name.toLowerCase().endsWith('.png');
-      const isJson = file.name.toLowerCase().endsWith('.json');
-      
-      if (!isPng && !isJson) {
-          continue; 
-      }
-      try {
-        let char: Character;
-        if (isPng) {
-            char = await parseCharacterCard(file);
-        } else {
-            char = await parseCharacterJson(file);
+        // Yield to GC properly to prevent memory ballooning
+        if (i % 10 === 0) {
+            setImportingCount(fileArray.length - i);
+            await new Promise(resolve => setTimeout(resolve, 0));
         }
 
-        if (isFolderImport && file.webkitRelativePath) {
-            const parts = file.webkitRelativePath.split('/');
-            if (parts.length >= 2) {
-                const folderPath = parts.slice(0, parts.length - 1).join('/');
-                if (folderPath) {
-                    let currentPath = '';
-                    for (const part of folderPath.split('/')) {
-                        currentPath = currentPath ? `${currentPath}/${part}` : part;
-                        newFoldersToCreate.add(currentPath);
+        const isPng = file.name.toLowerCase().endsWith('.png');
+        const isJson = file.name.toLowerCase().endsWith('.json');
+        
+        if (!isPng && !isJson) {
+            continue; 
+        }
+        try {
+            let char: Character;
+            if (isPng) {
+                char = await parseCharacterCard(file);
+            } else {
+                char = await parseCharacterJson(file);
+            }
+
+            if (isFolderImport && file.webkitRelativePath) {
+                const parts = file.webkitRelativePath.split('/');
+                if (parts.length >= 2) {
+                    const folderPath = parts.slice(0, parts.length - 1).join('/');
+                    if (folderPath) {
+                        let currentPath = '';
+                        for (const part of folderPath.split('/')) {
+                            currentPath = currentPath ? `${currentPath}/${part}` : part;
+                            newFoldersToCreate.add(currentPath);
+                        }
+                        char.folder = folderPath;
                     }
-                    char.folder = folderPath;
                 }
             }
-        }
 
-        const isDuplicateInApp = characters.some(c => c.name === char.name);
-        const isDuplicateInBatch = seenNamesInBatch.has(char.name);
-        
-        if (isDuplicateInApp || isDuplicateInBatch) {
-            duplicateFiles.push(file.name);
-            if (files.length === 1 && isDuplicateInApp) {
-                setWarning(`注意：检测到重复的角色 "${char.name}"，已导入`);
+            const isDuplicateInApp = existingNames.has(char.name);
+            const isDuplicateInBatch = seenNamesInBatch.has(char.name);
+            
+            if (isDuplicateInApp || isDuplicateInBatch) {
+                duplicateFiles.push(file.name);
+                if (files.length === 1 && isDuplicateInApp) {
+                    setWarning(`注意：检测到重复的角色 "${char.name}"，已导入`);
+                }
+            }
+            
+            seenNamesInBatch.add(char.name);
+            validChars.push(char);
+            successCount++;
+
+            // Periodically flush batch to free up memory
+            if (validChars.length >= 250) {
+                if (onImportBatch) {
+                    onImportBatch(validChars);
+                } else {
+                    validChars.forEach(c => onImport(c));
+                }
+                validChars = [];
+            }
+        } catch (err: any) {
+            console.error(`Failed to import ${file.name}:`, err);
+            failCount++;
+            const msg = err.message || "";
+            if (msg === "DETECTED_QR_FILE") {
+                qrFiles.push(file.name);
+            } else if (msg.includes("不是有效的 PNG 文件") || msg.includes("未在此图片中找到角色数据") || msg.includes("Invalid JSON file") || msg.includes("无效的")) {
+                invalidFormatFiles.push(file.name);
+            } else {
+                otherFailedFiles.push(file.name);
             }
         }
-        
-        seenNamesInBatch.add(char.name);
-        validChars.push(char);
-        successCount++;
-      } catch (err: any) {
-        console.error(`Failed to import ${file.name}:`, err);
-        failCount++;
-        const msg = err.message || "";
-        if (msg === "DETECTED_QR_FILE") {
-            qrFiles.push(file.name);
-        } else if (msg.includes("不是有效的 PNG 文件") || msg.includes("未在此图片中找到角色数据") || msg.includes("Invalid JSON file") || msg.includes("无效的")) {
-            invalidFormatFiles.push(file.name);
-        } else {
-            otherFailedFiles.push(file.name);
-        }
-      }
     }
 
     if (newFoldersToCreate.size > 0 && onCreateFolders) {
