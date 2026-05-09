@@ -341,8 +341,7 @@ export const parseCharacterCard = async (file: File): Promise<Character> => {
   }
 
   // Create Object URL for the image to use as avatar
-  // DO NOT use URL.createObjectURL here as it causes memory leaks for 7000+ files
-  const avatarUrl = ""; 
+  const avatarUrl = URL.createObjectURL(file);
   const id = crypto.randomUUID();
   await saveImage(id, file);
 
