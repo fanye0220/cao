@@ -15,6 +15,82 @@ import { loadImage } from '../services/imageService';
 // Global cache for avatar blob URLs to prevent rapid create/revoke cycles causing load failures
 const avatarUrlCache = new Map<string, string>();
 
+const stripHidden = (t: string) => {
+    const HIDE_PATTERNS = [
+      /\{\{reasoning\}\}[\s\S]*?\{\{\/reasoning\}\}/gi,
+      /<\|[\s\S]*?\|>/g,
+      /<!(?!--)[^>]*>/g,
+      /<think>[\s\S]*?<\/think>/gi,
+    ];
+    let res = t;
+    for (const p of HIDE_PATTERNS) res = res.replace(p, '');
+    return res;
+};
+
+const applyRegex = (text: string, scripts: any[], place: number = 2) => {
+    let r = text;
+    for (const s of scripts) {
+      if (s.disabled || s.promptOnly) continue;
+      if (s.placement && s.placement.length && !s.placement.includes(place)) continue;
+      try {
+        const m = s.find.match(/^\/(.*)\/([gimsuy]*)$/s);
+        let re;
+        if (m) {
+          re = new RegExp(m[1], m[2] || 'g');
+        } else {
+          re = new RegExp(s.find, 'g');
+        }
+        r = r.replace(re, s.replace || '');
+      } catch (e) {
+        // ignore
+      }
+    }
+    return r;
+};
+
+const renderHtmlMessage = (raw: string, char: Character) => {
+    if (!raw) return { __html: '' };
+    let scripts: any[] = [];
+    if (char.extensions && char.extensions.regex_scripts) {
+      scripts = char.extensions.regex_scripts;
+    } else if (char.originalData && char.originalData.extensions && char.originalData.extensions.regex_scripts) {
+      scripts = char.originalData.extensions.regex_scripts;
+    } else if (char.originalData && char.originalData.data && char.originalData.data.extensions && char.originalData.data.extensions.regex_scripts) {
+      scripts = char.originalData.data.extensions.regex_scripts;
+    }
+    
+    const parsedScripts = scripts.map((s: any, i: number) => ({
+      id: i,
+      find: s.findRegex || s.find || '',
+      replace: s.replaceString != null ? s.replaceString : (s.replace || ''),
+      disabled: !!s.disabled,
+      promptOnly: !!s.promptOnly,
+      placement: Array.isArray(s.placement) ? s.placement : [2],
+    })).filter((s: any) => s.find);
+
+    let text = stripHidden(raw);
+    text = applyRegex(text, parsedScripts, 2);
+    text = text.trim();
+    if (!text) return { __html: '' };
+    text = text.replace(/^```(?:html)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
+    
+    if (/<[a-zA-Z][^>]*>/.test(text)) {
+      return { __html: text };
+    }
+    
+    let t = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    t = t.replace(/\*\*([^*]+?)\*\*/g, '<strong style="font-weight:700">$1</strong>');
+    t = t.replace(/\*([^*]+?)\*/g, '<em style="font-style:italic">$1</em>');
+    
+    const paras = t.split(/\n{2,}/);
+    if (paras.length > 1) {
+      t = paras.map((p: string) => '<p style="margin:0 0 1em 0">' + p.replace(/\n/g, '<br>') + '</p>').join('');
+    } else {
+      t = t.replace(/\n/g, '<br>');
+    }
+    return { __html: t };
+};
+
 // Async lazy loading avatar component
 const AsyncAvatar: React.FC<{ charId: string; initialUrl?: string; alt: string; className?: string }> = ({ charId, initialUrl, alt, className }) => {
     // We prioritize memory cache, then initialUrl, then undefined
@@ -244,6 +320,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
   }, [sortOption]);
   const [compareModalOpen, setCompareModalOpen] = useState(false);
   const [viewCharacter, setViewCharacter] = useState<Character | null>(null);
+  const [showRenderedMsg, setShowRenderedMsg] = useState(false);
   
   // Tag & Collection Management
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
@@ -2925,8 +3002,20 @@ const CharacterList: React.FC<CharacterListProps> = ({
                     
                     {viewCharacter.firstMessage && (
                         <div>
-                            <h4 className="font-bold opacity-70 mb-2 text-xs uppercase tracking-wider">首发消息 (First Message)</h4>
-                            <p className="whitespace-pre-wrap text-sm leading-relaxed opacity-90">{viewCharacter.firstMessage}</p>
+                            <div className="flex justify-between items-center mb-2">
+                                <h4 className="font-bold opacity-70 text-xs uppercase tracking-wider">首发消息 (First Message)</h4>
+                                <button 
+                                    onClick={() => setShowRenderedMsg(!showRenderedMsg)}
+                                    className={`text-xs px-2 py-1 rounded border transition-colors ${theme === 'light' ? 'bg-white border-gray-200 hover:bg-gray-50 text-gray-600' : 'bg-slate-800 border-gray-700 hover:bg-slate-700 text-gray-300'}`}
+                                >
+                                    {showRenderedMsg ? '源码 (Raw)' : '渲染预览 (Rendered)'}
+                                </button>
+                            </div>
+                            {showRenderedMsg ? (
+                                <div className="text-sm leading-relaxed opacity-90 overflow-x-hidden markdown-body" dangerouslySetInnerHTML={renderHtmlMessage(viewCharacter.firstMessage, viewCharacter)} />
+                            ) : (
+                                <p className="whitespace-pre-wrap text-sm leading-relaxed opacity-90">{viewCharacter.firstMessage}</p>
+                            )}
                         </div>
                     )}
                     
