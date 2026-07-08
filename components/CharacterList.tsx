@@ -48,7 +48,7 @@ const applyRegex = (text: string, scripts: any[], place: number = 2) => {
     return r;
 };
 
-const renderHtmlMessage = (raw: string, char: Character) => {
+const renderHtmlMessage = (raw: string, char: Character, theme: string = 'dark') => {
     if (!raw) return { __html: '' };
     let scripts: any[] = [];
     if (char.extensions && char.extensions.regex_scripts) {
@@ -3012,7 +3012,7 @@ const CharacterList: React.FC<CharacterListProps> = ({
                                 </button>
                             </div>
                             {showRenderedMsg ? (
-                                <div className="text-sm leading-relaxed opacity-90 overflow-x-hidden markdown-body" dangerouslySetInnerHTML={renderHtmlMessage(viewCharacter.firstMessage, viewCharacter)} />
+                                <div className="text-sm leading-relaxed opacity-90 overflow-x-hidden markdown-body" dangerouslySetInnerHTML={renderHtmlMessage(viewCharacter.firstMessage, viewCharacter, theme)} />
                             ) : (
                                 <p className="whitespace-pre-wrap text-sm leading-relaxed opacity-90">{viewCharacter.firstMessage}</p>
                             )}

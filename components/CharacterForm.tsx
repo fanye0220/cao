@@ -39,7 +39,7 @@ const applyRegex = (text: string, scripts: any[], place: number = 2) => {
     return r;
 };
 
-const renderHtmlMessage = (raw: string, char: Partial<Character>) => {
+const renderHtmlMessage = (raw: string, char: Partial<Character>, theme: string = 'dark') => {
     if (!raw) return { __html: '' };
     let scripts: any[] = [];
     if (char.extensions && char.extensions.regex_scripts) {
@@ -71,7 +71,7 @@ const renderHtmlMessage = (raw: string, char: Partial<Character>) => {
     
     let t = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     t = t.replace(/\*\*([^\*]+?)\*\*/g, '<strong style="font-weight:700">$1</strong>');
-    t = t.replace(/\*([^\*]+?)\*/g, '<em style="font-style:italic">$1</em>');
+    t = t.replace(/\*([\s\S]+?)\*/g, `<em style="font-style:italic; color: ${theme === 'light' ? '#64748b' : '#94a3b8'}">$1</em>`);
     
     const paras = t.split(/\n{2,}/);
     if (paras.length > 1) {
@@ -1197,7 +1197,7 @@ const CharacterForm: React.FC<CharacterFormProps> = ({ initialData, onSave, onCa
                             ${theme === 'light' ? 'bg-white/30 border-slate-200/50' : 'bg-black/20 border-white/10'}`}>
                            {firstMesPreview && !isEditingFirstMes ? (
                                <div className={`flex-1 w-full p-8 text-sm leading-7 custom-scrollbar overflow-y-auto markdown-body ${theme === 'light' ? 'text-slate-700' : 'text-gray-200'}`} 
-                                    dangerouslySetInnerHTML={renderHtmlMessage(getCurrentMessage(), formData)} />
+                                    dangerouslySetInnerHTML={renderHtmlMessage(getCurrentMessage(), formData, theme)} />
                            ) : (
                                <textarea
                                    readOnly={!isEditingFirstMes}
