@@ -63,7 +63,7 @@ const renderHtmlMessage = (raw: string, char: Partial<Character>) => {
     text = applyRegex(text, parsedScripts, 2);
     text = text.trim();
     if (!text) return { __html: '' };
-    text = text.replace(/^```(?:html)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
+    text = text.replace(/```(?:html)?/gi, '').trim();
     
     if (/<[a-zA-Z][^>]*>/.test(text)) {
       return { __html: text };
